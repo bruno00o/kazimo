@@ -11,6 +11,7 @@ import {
 } from "matrix-js-sdk";
 import { playConnected, playEnded, playMessage, startRinging, stopRinging } from "../sounds";
 import { CallHost, RTC_MEMBER_TYPES } from "./call";
+import { ensureCryptoIdentity, secretStorageCallbacks } from "./crypto";
 import { plainMediaUrl } from "./media";
 import { loadRecentPhotos, photoFromEvent } from "./photos";
 
@@ -22,6 +23,7 @@ const RELOAD_AFTER_FAILURES = 5;
 
 interface RuntimeConfig extends KioskConfig {
   accessToken: string;
+  recoveryPassphrase: string | null;
 }
 
 export interface KioskCallbacks {
@@ -73,6 +75,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       userId: config.userId,
       deviceId: config.deviceId,
       useAuthorizationHeader: true,
+      cryptoCallbacks: secretStorageCallbacks(config.recoveryPassphrase),
     });
     client = matrix;
 
@@ -85,6 +88,10 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
     await matrix.startClient({ initialSyncLimit: 30 });
     await new Promise<void>((resolve) => matrix.once(ClientEvent.Sync, () => resolve()));
     if (stopped) return;
+
+    await ensureCryptoIdentity(matrix, config.recoveryPassphrase).catch((error) =>
+      console.error("crypto identity setup failed", error),
+    );
 
     if (config.roomId) await matrix.joinRoom(config.roomId).catch(() => {});
 
