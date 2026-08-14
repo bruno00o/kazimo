@@ -16,6 +16,8 @@ export interface AgentConfig {
   longitude: number | null;
   place: string | null;
   newsFeeds: string[] | null;
+  searchUrl: string;
+  searchKey: string | null;
 }
 
 export interface DaemonConfig extends KioskConfig {
@@ -70,6 +72,8 @@ export const daemonConfig: Config.Config<DaemonConfig> = Config.all({
     longitude: optionalNumber("KAZIMO_LONGITUDE"),
     place: optionalString("KAZIMO_PLACE"),
     newsFeeds: optionalStringList("KAZIMO_NEWS_FEEDS"),
+    searchUrl: Config.withDefault(Config.string("KAZIMO_SEARCH_URL"), "https://api.tavily.com/search"),
+    searchKey: optionalString("KAZIMO_SEARCH_KEY"),
   }),
   port: Config.withDefault(Config.number("KAZIMO_PORT"), 8080),
 });

@@ -124,6 +124,28 @@ async function newsReport(agent: AgentConfig): Promise<string> {
   return `Latest headlines: ${headlines.join(" | ")}`;
 }
 
+const SEARCH_RESULTS = 5;
+
+interface TavilyResponse {
+  results: Array<{ title: string; url: string; content: string }>;
+}
+
+async function searchReport(agent: AgentConfig, query: string): Promise<string> {
+  if (!agent.searchKey) return "Web search is not configured on this device (no search key set).";
+  const res = await fetch(agent.searchUrl, {
+    method: "POST",
+    headers: { authorization: `Bearer ${agent.searchKey}`, "content-type": "application/json" },
+    body: JSON.stringify({ query, max_results: SEARCH_RESULTS }),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`search failed (${res.status})`);
+  const data = (await res.json()) as TavilyResponse;
+  if (data.results.length === 0) return "The search returned no results.";
+  return data.results
+    .map((result) => `${result.title} (${result.url}): ${result.content}`)
+    .join(" | ");
+}
+
 const reportOrFallback = (run: () => Promise<string>, fallback: string) =>
   Effect.promise(async () => {
     try {
@@ -151,7 +173,18 @@ const News = Tool.make("News", {
   success: Schema.Struct({ report: Schema.String }),
 });
 
-export const AgentToolkit = Toolkit.make(CurrentTime, Weather, News);
+const Search = Tool.make("Search", {
+  description:
+    "Search the web for current facts not covered by other tools, such as opening hours, events or dates",
+  parameters: Schema.Struct({
+    query: Schema.String.annotate({
+      description: "The search query, phrased in the language most likely to find results",
+    }),
+  }),
+  success: Schema.Struct({ report: Schema.String }),
+});
+
+export const AgentToolkit = Toolkit.make(CurrentTime, Weather, News, Search);
 
 export const AgentToolkitLayer = AgentToolkit.toLayer(
   Effect.gen(function* () {
@@ -171,6 +204,11 @@ export const AgentToolkitLayer = AgentToolkit.toLayer(
         reportOrFallback(
           () => newsReport(config.agent),
           "The news feeds could not be reached right now.",
+        ),
+      Search: ({ query }) =>
+        reportOrFallback(
+          () => searchReport(config.agent, query),
+          "The web search could not be reached right now.",
         ),
     });
   }),
