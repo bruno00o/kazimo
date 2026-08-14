@@ -1,6 +1,7 @@
 import type { DaemonToKiosk, KioskToDaemon } from "@kazimo/shared";
 import { Context, Effect, Layer, Schema } from "effect";
 import kioskPage from "../../kiosk/index.html";
+import { transcribe } from "./ai";
 import { wavFromPcm16 } from "./audio";
 import { type DaemonConfig, daemonConfig } from "./config";
 
@@ -36,7 +37,7 @@ function start(config: DaemonConfig) {
       "/": kioskPage,
 
       "/api/config": () => {
-        const { port: _port, ...kioskConfig } = config;
+        const { port: _port, ai: _ai, ...kioskConfig } = config;
         return Response.json(kioskConfig);
       },
     },
@@ -81,10 +82,17 @@ function start(config: DaemonConfig) {
           ws.data.capture = null;
           const pcm = Buffer.concat(frames);
           const seconds = pcm.byteLength / 2 / sampleRate;
-          await Bun.write(CAPTURE_PATH, wavFromPcm16(pcm, sampleRate));
+          const wav = wavFromPcm16(pcm, sampleRate);
+          await Bun.write(CAPTURE_PATH, wav);
           log(`capture: ${seconds.toFixed(1)}s (${pcm.byteLength} bytes) -> ${CAPTURE_PATH}`);
           const ack: DaemonToKiosk = { type: "captured", seconds };
           ws.send(JSON.stringify(ack));
+          if (config.ai.key) {
+            const started = Date.now();
+            transcribe(config.ai, wav, config.lang)
+              .then((text) => log(`transcription (${Date.now() - started}ms): ${text}`))
+              .catch((error) => log(`transcription failed: ${error}`));
+          }
         }
       },
       close(ws) {

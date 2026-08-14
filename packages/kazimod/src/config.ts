@@ -1,9 +1,16 @@
 import type { KioskConfig } from "@kazimo/shared";
 import { Config, Option } from "effect";
 
+export interface AiConfig {
+  baseUrl: string;
+  key: string | null;
+  sttModel: string;
+}
+
 export interface DaemonConfig extends KioskConfig {
   accessToken: string;
   recoveryPassphrase: string | null;
+  ai: AiConfig;
   port: number;
 }
 
@@ -31,5 +38,10 @@ export const daemonConfig: Config.Config<DaemonConfig> = Config.all({
   lang: Config.withDefault(Config.string("KAZIMO_LANG"), "en"),
   idleReturnSeconds: Config.withDefault(Config.number("KAZIMO_IDLE_RETURN"), 30),
   autoAnswerDelayMs: Config.withDefault(Config.number("KAZIMO_AUTO_ANSWER_MS"), 3000),
+  ai: Config.all({
+    baseUrl: Config.withDefault(Config.string("KAZIMO_AI_BASE_URL"), "https://api.mistral.ai/v1"),
+    key: Config.string("KAZIMO_AI_KEY").pipe(Config.option, Config.map(Option.getOrNull)),
+    sttModel: Config.withDefault(Config.string("KAZIMO_AI_STT_MODEL"), "voxtral-mini-latest"),
+  }),
   port: Config.withDefault(Config.number("KAZIMO_PORT"), 8080),
 });
