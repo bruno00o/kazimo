@@ -8,6 +8,7 @@
     "start": "bun run src/index.ts"
   },
   "dependencies": {
+    "@effect/ai-openai-compat": "4.0.0-rc.109",
     "@effect/platform-bun": "4.0.0-rc.109",
     "@kazimo/shared": "workspace:*",
     "effect": "4.0.0-rc.109"

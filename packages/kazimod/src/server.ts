@@ -1,6 +1,7 @@
 import type { DaemonToKiosk, KioskToDaemon } from "@kazimo/shared";
 import { Context, Effect, Layer, Schema } from "effect";
 import kioskPage from "../../kiosk/index.html";
+import { Agent } from "./agent";
 import { transcribe } from "./ai";
 import { wavFromPcm16 } from "./audio";
 import { type DaemonConfig, daemonConfig } from "./config";
@@ -26,7 +27,7 @@ interface SocketData {
   capture: { sampleRate: number; frames: Uint8Array[] } | null;
 }
 
-function start(config: DaemonConfig) {
+function start(config: DaemonConfig, ask: (question: string) => Promise<string>) {
   const isDev = process.env.NODE_ENV !== "production";
 
   return Bun.serve<SocketData>({
@@ -90,8 +91,14 @@ function start(config: DaemonConfig) {
           if (config.ai.key) {
             const started = Date.now();
             transcribe(config.ai, wav, config.lang)
-              .then((text) => log(`transcription (${Date.now() - started}ms): ${text}`))
-              .catch((error) => log(`transcription failed: ${error}`));
+              .then(async (text) => {
+                log(`transcription (${Date.now() - started}ms): ${text}`);
+                if (!text.trim()) return;
+                const askStarted = Date.now();
+                const reply = await ask(text);
+                log(`agent (${Date.now() - askStarted}ms): ${reply}`);
+              })
+              .catch((error) => log(`agent pipeline failed: ${error}`));
           }
         }
       },
@@ -112,10 +119,12 @@ export class KioskServer extends Context.Service<
     KioskServer,
     Effect.gen(function* () {
       const config = yield* daemonConfig;
+      const agent = yield* Agent;
+      const ask = (question: string) => Effect.runPromise(agent.ask(question));
 
       const server = yield* Effect.acquireRelease(
         Effect.try({
-          try: () => start(config),
+          try: () => start(config, ask),
           catch: (cause) => new ServerStartError({ cause }),
         }),
         (running) => Effect.promise(() => running.stop()),

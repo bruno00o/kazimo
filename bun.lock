@@ -14,6 +14,7 @@
       "name": "@kazimo/kazimod",
       "version": "0.0.1",
       "dependencies": {
+        "@effect/ai-openai-compat": "4.0.0-rc.109",
         "@effect/platform-bun": "4.0.0-rc.109",
         "@kazimo/shared": "workspace:*",
         "effect": "4.0.0-rc.109",
@@ -62,6 +63,8 @@
     "@biomejs/cli-win32-arm64": ["@biomejs/cli-win32-arm64@2.5.8", "", { "os": "win32", "cpu": "arm64" }, "sha512-nILH0mzm3Hi3iEdd7o7GpB8kBR/mSQwfQG/tyBqyNrY2GFtcgwfV9nV8xLmbtUpMNY/Oi0Ml1XgfR4flOdq+AA=="],
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.5.8", "", { "os": "win32", "cpu": "x64" }, "sha512-I2czzXTY61f3nFJxXoMDq80t7MivxDEnCjE+8sDKoFfcKMaoQdkqhIFQ3KyY0XLzeSpUBYeNAXgD+iOV/BU0VA=="],
+
+    "@effect/ai-openai-compat": ["@effect/ai-openai-compat@4.0.0-rc.109", "", { "peerDependencies": { "effect": "^4.0.0-rc.109" } }, "sha512-bA+1NOKJZvmNlLDFMWewTHNVW5fnEIJGyXtgQxT1LZs9l7MDCO9XIGj9Wuk9wRDuje0jkyP+kNyQLiUADuFwDQ=="],
 
     "@effect/platform-bun": ["@effect/platform-bun@4.0.0-rc.109", "", { "dependencies": { "@effect/platform-node-shared": "^4.0.0-rc.109" }, "peerDependencies": { "effect": "^4.0.0-rc.109" } }, "sha512-fOOGilEBTKOYjRrOcblSiX5GdQOmR46ETTyMmkQoqYhmx+iAMKImM5YoCm10QDMWtbzerT4oeDKUJivXvOC20w=="],
 
