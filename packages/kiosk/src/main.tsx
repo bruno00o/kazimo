@@ -2,6 +2,7 @@ import type { KioskState } from "@kazimo/shared";
 import { tokens } from "@kazimo/shared";
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { startAgent } from "./agent";
 import { ScreenFor } from "./screens";
 import { KioskStateProvider, useKioskState } from "./state";
 
@@ -64,6 +65,8 @@ function App() {
   const { state } = useKioskState();
   return <FadeStack state={forced ? (FORCED[forced] ?? IDLE) : state} />;
 }
+
+startAgent();
 
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");

@@ -22,9 +22,18 @@ export interface PhotoRef {
   timestamp: number;
 }
 
-export type DaemonToKiosk = { type: "state"; state: KioskState } | { type: "config"; config: KioskConfig };
+export const CAPTURE_SAMPLE_RATE = 16000;
 
-export type KioskToDaemon = { type: "ready" } | { type: "event"; name: KioskEvent };
+export type DaemonToKiosk =
+  | { type: "state"; state: KioskState }
+  | { type: "config"; config: KioskConfig }
+  | { type: "captured"; seconds: number };
+
+export type KioskToDaemon =
+  | { type: "ready" }
+  | { type: "event"; name: KioskEvent }
+  | { type: "capture-start"; sampleRate: number }
+  | { type: "capture-end" };
 
 export type KioskEvent = "call-connected" | "call-ended" | "media-error";
 
@@ -34,6 +43,7 @@ export interface KioskConfig {
   deviceId: string;
   roomId: string | null;
   contacts: string[] | null;
+  mic: string | null;
   lang: string;
   idleReturnSeconds: number;
   autoAnswerDelayMs: number;

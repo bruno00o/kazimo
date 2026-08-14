@@ -27,6 +27,7 @@ export const daemonConfig: Config.Config<DaemonConfig> = Config.all({
     Config.option,
     Config.map(Option.getOrNull),
   ),
+  mic: Config.string("KAZIMO_MIC").pipe(Config.option, Config.map(Option.getOrNull)),
   lang: Config.withDefault(Config.string("KAZIMO_LANG"), "en"),
   idleReturnSeconds: Config.withDefault(Config.number("KAZIMO_IDLE_RETURN"), 30),
   autoAnswerDelayMs: Config.withDefault(Config.number("KAZIMO_AUTO_ANSWER_MS"), 3000),
