@@ -7,6 +7,7 @@
     "@element-hq/element-call-embedded": "0.23.0",
     "@kazimo/shared": "workspace:*",
     "@matrix-org/matrix-sdk-crypto-wasm": "^18.5.0",
+    "matrix-encrypt-attachment": "1.0.3",
     "matrix-js-sdk": "42.1.0",
     "matrix-widget-api": "1.18.0",
     "react": "^19.1.0",
