@@ -1,21 +1,30 @@
-import { CAPTURE_SAMPLE_RATE, type DaemonToKiosk } from "@kazimo/shared";
+import type { DaemonToKiosk } from "@kazimo/shared";
 import { connectDaemon } from "./link";
 import { type MicCapture, startMicCapture } from "./mic";
 
 export function startAgent(): () => void {
   let mic: string | null = null;
   let session: Promise<MicCapture | null> | null = null;
+  let voice: { element: HTMLAudioElement; url: string } | null = null;
+
+  const play = (audio: ArrayBuffer) => {
+    if (voice) {
+      voice.element.pause();
+      URL.revokeObjectURL(voice.url);
+    }
+    const url = URL.createObjectURL(new Blob([audio], { type: "audio/mpeg" }));
+    const element = new Audio(url);
+    voice = { element, url };
+    element.play().catch((error) => console.error("speech playback failed", error));
+  };
 
   const link = connectDaemon((message: DaemonToKiosk) => {
     if (message.type === "config") mic = message.config.mic;
-    if (message.type === "captured") {
-      console.log(`capture received by daemon: ${message.seconds.toFixed(1)}s`);
-    }
-  });
+  }, play);
 
   const begin = () => {
     if (session) return;
-    link.send({ type: "capture-start", sampleRate: CAPTURE_SAMPLE_RATE });
+    link.send({ type: "capture-start" });
     session = startMicCapture(mic, (frame) => link.sendAudio(frame)).catch((error) => {
       console.error("mic capture failed", error);
       return null;

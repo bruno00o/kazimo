@@ -1,8 +1,8 @@
-import type { DaemonToKiosk, KioskToDaemon } from "@kazimo/shared";
+import { CAPTURE_SAMPLE_RATE, type DaemonToKiosk, type KioskToDaemon } from "@kazimo/shared";
 import { Context, Effect, Layer, Schema } from "effect";
 import kioskPage from "../../kiosk/index.html";
 import { Agent } from "./agent";
-import { transcribe } from "./ai";
+import { speak, transcribe } from "./ai";
 import { wavFromPcm16 } from "./audio";
 import { type DaemonConfig, daemonConfig } from "./config";
 
@@ -24,11 +24,40 @@ const log = (message: string) => console.log(`[kazimod] ${new Date().toISOString
 
 interface SocketData {
   id: number;
-  capture: { sampleRate: number; frames: Uint8Array[] } | null;
+  capture: Uint8Array[] | null;
 }
 
 function start(config: DaemonConfig, ask: (question: string) => Promise<string>) {
   const isDev = process.env.NODE_ENV !== "production";
+  const { port: _port, ai: _ai, ...kioskConfig } = config;
+
+  const respond = async (ws: Bun.ServerWebSocket<SocketData>, frames: Uint8Array[]) => {
+    const pcm = Buffer.concat(frames);
+    const seconds = pcm.byteLength / 2 / CAPTURE_SAMPLE_RATE;
+    const wav = wavFromPcm16(pcm, CAPTURE_SAMPLE_RATE);
+    void Bun.write(CAPTURE_PATH, wav).catch((error) => log(`capture write failed: ${error}`));
+    log(`capture: ${seconds.toFixed(1)}s (${pcm.byteLength} bytes)`);
+    if (!config.ai.key) return;
+
+    const sttStarted = Date.now();
+    const text = await transcribe(config.ai, wav, config.lang);
+    log(`transcription (${Date.now() - sttStarted}ms): ${text}`);
+    if (!text.trim()) return;
+
+    const askStarted = Date.now();
+    const reply = await ask(text);
+    log(`agent (${Date.now() - askStarted}ms): ${reply}`);
+    if (!reply.trim()) return;
+
+    const ttsStarted = Date.now();
+    const audio = await speak(config.ai, reply, config.lang);
+    if (!audio) {
+      log(`tts skipped: no reference file and no catalog voice for "${config.lang}"`);
+      return;
+    }
+    log(`tts (${Date.now() - ttsStarted}ms): ${audio.byteLength} bytes`);
+    ws.send(audio);
+  };
 
   return Bun.serve<SocketData>({
     port: config.port,
@@ -37,10 +66,7 @@ function start(config: DaemonConfig, ask: (question: string) => Promise<string>)
     routes: {
       "/": kioskPage,
 
-      "/api/config": () => {
-        const { port: _port, ai: _ai, ...kioskConfig } = config;
-        return Response.json(kioskConfig);
-      },
+      "/api/config": () => Response.json(kioskConfig),
     },
 
     async fetch(req, srv) {
@@ -65,41 +91,22 @@ function start(config: DaemonConfig, ask: (question: string) => Promise<string>)
     websocket: {
       open(ws) {
         log(`kiosk connected (${ws.data.id})`);
-        const hello: DaemonToKiosk = { type: "config", config };
+        const hello: DaemonToKiosk = { type: "config", config: kioskConfig };
         ws.send(JSON.stringify(hello));
       },
-      async message(ws, raw) {
+      message(ws, raw) {
         if (typeof raw !== "string") {
-          ws.data.capture?.frames.push(new Uint8Array(raw));
+          ws.data.capture?.push(new Uint8Array(raw));
           return;
         }
         const msg = JSON.parse(raw) as KioskToDaemon;
         if (msg.type === "ready") log("kiosk reports ready");
         else if (msg.type === "event") log(`kiosk event: ${msg.name}`);
-        else if (msg.type === "capture-start") {
-          ws.data.capture = { sampleRate: msg.sampleRate, frames: [] };
-        } else if (msg.type === "capture-end" && ws.data.capture) {
-          const { sampleRate, frames } = ws.data.capture;
+        else if (msg.type === "capture-start") ws.data.capture = [];
+        else if (msg.type === "capture-end" && ws.data.capture) {
+          const frames = ws.data.capture;
           ws.data.capture = null;
-          const pcm = Buffer.concat(frames);
-          const seconds = pcm.byteLength / 2 / sampleRate;
-          const wav = wavFromPcm16(pcm, sampleRate);
-          await Bun.write(CAPTURE_PATH, wav);
-          log(`capture: ${seconds.toFixed(1)}s (${pcm.byteLength} bytes) -> ${CAPTURE_PATH}`);
-          const ack: DaemonToKiosk = { type: "captured", seconds };
-          ws.send(JSON.stringify(ack));
-          if (config.ai.key) {
-            const started = Date.now();
-            transcribe(config.ai, wav, config.lang)
-              .then(async (text) => {
-                log(`transcription (${Date.now() - started}ms): ${text}`);
-                if (!text.trim()) return;
-                const askStarted = Date.now();
-                const reply = await ask(text);
-                log(`agent (${Date.now() - askStarted}ms): ${reply}`);
-              })
-              .catch((error) => log(`agent pipeline failed: ${error}`));
-          }
+          void respond(ws, frames).catch((error) => log(`agent pipeline failed: ${error}`));
         }
       },
       close(ws) {

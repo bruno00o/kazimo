@@ -9,7 +9,10 @@ export interface DaemonLink {
   stop: () => void;
 }
 
-export function connectDaemon(onMessage: (message: DaemonToKiosk) => void): DaemonLink {
+export function connectDaemon(
+  onMessage: (message: DaemonToKiosk) => void,
+  onAudio: (audio: ArrayBuffer) => void,
+): DaemonLink {
   let socket: WebSocket | null = null;
   let stopped = false;
   let attempts = 0;
@@ -24,6 +27,7 @@ export function connectDaemon(onMessage: (message: DaemonToKiosk) => void): Daem
     };
     ws.onmessage = (event) => {
       if (typeof event.data === "string") onMessage(JSON.parse(event.data) as DaemonToKiosk);
+      else onAudio(event.data as ArrayBuffer);
     };
     ws.onclose = () => {
       socket = null;

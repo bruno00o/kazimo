@@ -24,15 +24,12 @@ export interface PhotoRef {
 
 export const CAPTURE_SAMPLE_RATE = 16000;
 
-export type DaemonToKiosk =
-  | { type: "state"; state: KioskState }
-  | { type: "config"; config: KioskConfig }
-  | { type: "captured"; seconds: number };
+export type DaemonToKiosk = { type: "state"; state: KioskState } | { type: "config"; config: KioskConfig };
 
 export type KioskToDaemon =
   | { type: "ready" }
   | { type: "event"; name: KioskEvent }
-  | { type: "capture-start"; sampleRate: number }
+  | { type: "capture-start" }
   | { type: "capture-end" };
 
 export type KioskEvent = "call-connected" | "call-ended" | "media-error";

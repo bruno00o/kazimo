@@ -1,8 +1,8 @@
 import { OpenAiClient, OpenAiLanguageModel } from "@effect/ai-openai-compat";
-import { Config, Context, Effect, Layer, Option, Schema } from "effect";
+import { Context, Effect, Layer, Redacted, Schema } from "effect";
 import { type AiError, Chat, Tool, Toolkit } from "effect/unstable/ai";
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable/http";
-import { AI_BASE_URL_DEFAULT, daemonConfig } from "./config";
+import { daemonConfig } from "./config";
 
 const CurrentTime = Tool.make("CurrentTime", {
   description: "Get the current date and time",
@@ -26,33 +26,42 @@ const AgentToolkitLayer = AgentToolkit.toLayer(
   ),
 );
 
-const stripNullToolCalls = (client: HttpClient.HttpClient): HttpClient.HttpClient =>
-  HttpClient.transform(client, (effect, request) =>
-    Effect.flatMap(effect, (response) => {
+const withoutNullToolCalls = (text: string): string => {
+  const completion = JSON.parse(text) as { choices?: Array<{ message?: { tool_calls?: unknown } }> };
+  for (const choice of completion.choices ?? []) {
+    if (choice.message && choice.message.tool_calls === null) delete choice.message.tool_calls;
+  }
+  return JSON.stringify(completion);
+};
+
+const mistralToolCallsShim = (client: HttpClient.HttpClient): HttpClient.HttpClient =>
+  HttpClient.transform(client, (effect, request) => {
+    if (!request.url.endsWith("/chat/completions")) return effect;
+    return Effect.flatMap(effect, (response) => {
       if (!response.headers["content-type"]?.includes("application/json")) {
         return Effect.succeed(response);
       }
-      return Effect.map(response.json, (body) => {
-        const completion = body as { choices?: Array<{ message?: { tool_calls?: unknown } }> };
-        for (const choice of completion.choices ?? []) {
-          if (choice.message && choice.message.tool_calls === null) delete choice.message.tool_calls;
-        }
-        return HttpClientResponse.fromWeb(
+      return Effect.map(response.text, (text) =>
+        HttpClientResponse.fromWeb(
           request,
-          new Response(JSON.stringify(body), {
+          new Response(text.includes('"tool_calls"') ? withoutNullToolCalls(text) : text, {
             status: response.status,
             headers: { "content-type": "application/json" },
           }),
-        );
-      });
-    }),
-  );
+        ),
+      );
+    });
+  });
 
-const clientLayer = OpenAiClient.layerConfig({
-  apiUrl: Config.withDefault(Config.string("KAZIMO_AI_BASE_URL"), AI_BASE_URL_DEFAULT),
-  apiKey: Config.redacted("KAZIMO_AI_KEY").pipe(Config.option, Config.map(Option.getOrUndefined)),
-  transformClient: stripNullToolCalls,
-}).pipe(Layer.provide(FetchHttpClient.layer));
+const clientLayer = Layer.unwrap(
+  Effect.map(daemonConfig, (config) =>
+    OpenAiClient.layer({
+      apiUrl: config.ai.baseUrl,
+      apiKey: config.ai.key ? Redacted.make(config.ai.key) : undefined,
+      transformClient: mistralToolCallsShim,
+    }),
+  ),
+).pipe(Layer.provide(FetchHttpClient.layer));
 
 const MAX_AGENT_TURNS = 5;
 
