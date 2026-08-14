@@ -9,12 +9,16 @@ import {
   RoomEvent,
   RoomStateEvent,
 } from "matrix-js-sdk";
+import { playConnected, playEnded, playMessage, startRinging, stopRinging } from "../sounds";
 import { CallHost, RTC_MEMBER_TYPES } from "./call";
 import { plainMediaUrl } from "./media";
 import { loadRecentPhotos, photoFromEvent } from "./photos";
 
 const PHOTO_ROTATE_MS = 30_000;
 const PHOTO_POOL_SIZE = 20;
+const RETRY_BASE_MS = 5000;
+const RETRY_MAX_MS = 60_000;
+const RELOAD_AFTER_FAILURES = 5;
 
 interface RuntimeConfig extends KioskConfig {
   accessToken: string;
@@ -108,6 +112,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
     };
 
     const show = (state: KioskState) => {
+      if (state.kind !== "incoming-call") stopRinging();
       mode = state.kind;
       callbacks.setState(state);
     };
@@ -136,6 +141,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       const caller = await personFor(room, callerId);
       if (stopped || mode === "in-call") return;
       show({ kind: "incoming-call", caller });
+      startRinging();
       later(async () => {
         if (mode !== "incoming-call" || !callHost) return;
         show({ kind: "in-call", caller });
@@ -145,8 +151,10 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
           return;
         }
         callHost.mount(room.roomId, container, () => {
+          playEnded();
           if (!stopped) showIdle();
         });
+        playConnected();
       }, config.autoAnswerDelayMs);
     };
 
@@ -164,6 +172,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
         photoIndex = 0;
         if (mode === "idle" || mode === "message") {
           show({ kind: "message", from: await personFor(room, sender), photo });
+          playMessage();
           scheduleIdleReturn();
         }
         return;
@@ -171,9 +180,18 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
 
       if (content.msgtype === "m.text" && (mode === "idle" || mode === "message")) {
         show({ kind: "message", from: await personFor(room, sender), text: String(content.body ?? "") });
+        playMessage();
         scheduleIdleReturn();
       }
     };
+
+    matrix.on(ClientEvent.Sync, (syncState) => {
+      if (stopped) return;
+      if (String(syncState) === "ERROR" && (mode === "idle" || mode === "message")) {
+        show({ kind: "degraded", reason: "offline" });
+      }
+      if (String(syncState) === "SYNCING" && mode === "degraded") showIdle();
+    });
 
     matrix.on(RoomStateEvent.Events, (event: MatrixEvent) => {
       if (stopped || !RTC_MEMBER_TYPES.has(event.getType())) return;
@@ -199,6 +217,11 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
 
     matrix.on(RoomEvent.MyMembership, (room: Room, membership: string) => {
       if (stopped || membership !== "invite") return;
+      const inviter = room.getMember(config.userId)?.events.member?.getSender();
+      if (config.contacts && (!inviter || !config.contacts.includes(inviter))) {
+        console.warn(`invite ignored from ${inviter ?? "unknown"}: ${room.roomId}`);
+        return;
+      }
       void matrix
         .joinRoom(room.roomId)
         .then(async (joined) => {
@@ -241,9 +264,27 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
     timers.add(rotate);
   };
 
-  void run().catch((error) => {
-    if (!stopped) callbacks.setState({ kind: "degraded", reason: String(error) });
-  });
+  let failures = 0;
+  const start = () => {
+    void run()
+      .then(() => {
+        failures = 0;
+      })
+      .catch((error) => {
+        if (stopped) return;
+        callbacks.setState({ kind: "degraded", reason: String(error) });
+        client?.stopClient();
+        client = null;
+        callHost = null;
+        failures += 1;
+        if (failures >= RELOAD_AFTER_FAILURES) {
+          location.reload();
+          return;
+        }
+        later(start, Math.min(RETRY_BASE_MS * 2 ** (failures - 1), RETRY_MAX_MS));
+      });
+  };
+  start();
 
   return {
     stop() {

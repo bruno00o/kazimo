@@ -33,6 +33,7 @@ export interface KioskConfig {
   userId: string;
   deviceId: string;
   roomId: string | null;
+  contacts: string[] | null;
   lang: string;
   idleReturnSeconds: number;
   autoAnswerDelayMs: number;
