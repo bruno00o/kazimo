@@ -11,24 +11,29 @@ export interface AiConfig {
   ttsRef: string | null;
 }
 
+export interface AgentConfig {
+  latitude: number | null;
+  longitude: number | null;
+  place: string | null;
+  newsFeeds: string[] | null;
+}
+
 export interface DaemonConfig extends KioskConfig {
   accessToken: string;
   recoveryPassphrase: string | null;
   ai: AiConfig;
+  agent: AgentConfig;
   port: number;
 }
 
 const optionalString = (name: string) =>
   Config.string(name).pipe(Config.option, Config.map(Option.getOrNull));
 
-export const daemonConfig: Config.Config<DaemonConfig> = Config.all({
-  homeserverUrl: Config.string("KAZIMO_HOMESERVER"),
-  userId: Config.string("KAZIMO_USER"),
-  deviceId: Config.string("KAZIMO_DEVICE"),
-  accessToken: Config.string("KAZIMO_TOKEN"),
-  recoveryPassphrase: optionalString("KAZIMO_RECOVERY_PASSPHRASE"),
-  roomId: optionalString("KAZIMO_ROOM"),
-  contacts: Config.string("KAZIMO_CONTACTS").pipe(
+const optionalNumber = (name: string) =>
+  Config.number(name).pipe(Config.option, Config.map(Option.getOrNull));
+
+const optionalStringList = (name: string) =>
+  Config.string(name).pipe(
     Config.map((raw) =>
       raw
         .split(",")
@@ -37,7 +42,16 @@ export const daemonConfig: Config.Config<DaemonConfig> = Config.all({
     ),
     Config.option,
     Config.map(Option.getOrNull),
-  ),
+  );
+
+export const daemonConfig: Config.Config<DaemonConfig> = Config.all({
+  homeserverUrl: Config.string("KAZIMO_HOMESERVER"),
+  userId: Config.string("KAZIMO_USER"),
+  deviceId: Config.string("KAZIMO_DEVICE"),
+  accessToken: Config.string("KAZIMO_TOKEN"),
+  recoveryPassphrase: optionalString("KAZIMO_RECOVERY_PASSPHRASE"),
+  roomId: optionalString("KAZIMO_ROOM"),
+  contacts: optionalStringList("KAZIMO_CONTACTS"),
   mic: optionalString("KAZIMO_MIC"),
   lang: Config.withDefault(Config.string("KAZIMO_LANG"), "en"),
   idleReturnSeconds: Config.withDefault(Config.number("KAZIMO_IDLE_RETURN"), 30),
@@ -50,6 +64,12 @@ export const daemonConfig: Config.Config<DaemonConfig> = Config.all({
     ttsModel: Config.withDefault(Config.string("KAZIMO_AI_TTS_MODEL"), "voxtral-mini-tts-latest"),
     ttsVoice: optionalString("KAZIMO_AI_TTS_VOICE"),
     ttsRef: optionalString("KAZIMO_AI_TTS_REF"),
+  }),
+  agent: Config.all({
+    latitude: optionalNumber("KAZIMO_LATITUDE"),
+    longitude: optionalNumber("KAZIMO_LONGITUDE"),
+    place: optionalString("KAZIMO_PLACE"),
+    newsFeeds: optionalStringList("KAZIMO_NEWS_FEEDS"),
   }),
   port: Config.withDefault(Config.number("KAZIMO_PORT"), 8080),
 });

@@ -29,7 +29,7 @@ interface SocketData {
 
 function start(config: DaemonConfig, ask: (question: string) => Promise<string>) {
   const isDev = process.env.NODE_ENV !== "production";
-  const { port: _port, ai: _ai, ...kioskConfig } = config;
+  const { port: _port, ai: _ai, agent: _agent, ...kioskConfig } = config;
 
   const respond = async (ws: Bun.ServerWebSocket<SocketData>, frames: Uint8Array[]) => {
     const pcm = Buffer.concat(frames);

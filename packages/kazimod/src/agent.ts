@@ -1,30 +1,9 @@
 import { OpenAiClient, OpenAiLanguageModel } from "@effect/ai-openai-compat";
-import { Context, Effect, Layer, Redacted, Schema } from "effect";
-import { type AiError, Chat, Tool, Toolkit } from "effect/unstable/ai";
+import { Context, Effect, Layer, Redacted } from "effect";
+import { type AiError, Chat } from "effect/unstable/ai";
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { daemonConfig } from "./config";
-
-const CurrentTime = Tool.make("CurrentTime", {
-  description: "Get the current date and time",
-  success: Schema.Struct({
-    iso: Schema.String,
-    timeZone: Schema.String,
-  }),
-});
-
-const AgentToolkit = Toolkit.make(CurrentTime);
-
-const AgentToolkitLayer = AgentToolkit.toLayer(
-  Effect.sync(() =>
-    AgentToolkit.of({
-      CurrentTime: () =>
-        Effect.sync(() => ({
-          iso: new Date().toISOString(),
-          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        })),
-    }),
-  ),
-);
+import { AgentToolkit, AgentToolkitLayer } from "./tools";
 
 const withoutNullToolCalls = (text: string): string => {
   const completion = JSON.parse(text) as { choices?: Array<{ message?: { tool_calls?: unknown } }> };
@@ -70,7 +49,9 @@ const systemPrompt = (lang: string) =>
   `Answer in the language with BCP 47 code "${lang}". ` +
   `Be brief and warm: one or two spoken sentences, no lists, no markup. ` +
   `Only state facts you are certain of or that come from a tool result; sharing stable general knowledge you are sure of is fine. ` +
-  `You have no access to news, weather or any other live information: when asked about current events, say plainly that you cannot check that yet, and never improvise an answer from memory. ` +
+  `For live information such as weather or news, always use your tools. ` +
+  `The configured feeds and location are the right ones for the person whatever their language: translate what matters from tool results into the answer language. ` +
+  `If no tool covers the question, or a tool reports it is not configured or unreachable, say plainly that you cannot check that, and never improvise an answer from memory. ` +
   `Saying you do not know is always a good answer; a confident wrong answer never is. ` +
   `Never give medical advice: no diagnosis, no medication guidance, no reassurance about symptoms. ` +
   `If a question touches health, say it is one for a doctor and suggest calling a close family member to talk about it. ` +
