@@ -1,6 +1,8 @@
 # Local experiments
 spikes/
 
+repos/
+
 *.md
 !README.md
 .env
