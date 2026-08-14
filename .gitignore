@@ -1,0 +1,8 @@
+# Local experiments
+spikes/
+
+*.md
+!README.md
+.env
+node_modules/
+dist/

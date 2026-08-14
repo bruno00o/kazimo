@@ -1,0 +1,20 @@
+{
+  "name": "kazimo",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun run --watch packages/kazimod/src/index.ts",
+    "start": "NODE_ENV=production bun run packages/kazimod/src/index.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p packages/shared && tsc --noEmit -p packages/kiosk && tsc --noEmit -p packages/kazimod",
+    "check": "biome check packages",
+    "format": "biome check --write packages"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.0",
+    "@types/bun": "^1.3.0",
+    "typescript": "^7.0.0"
+  }
+}
