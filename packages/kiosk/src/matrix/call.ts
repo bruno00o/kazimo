@@ -65,6 +65,16 @@ export class CallHost {
     api.setViewedRoomId(roomId);
     this.api = api;
 
+    let contentLoaded = false;
+    api.on("action:content_loaded", (ev: CustomEvent<IWidgetApiRequest>) => {
+      if (!contentLoaded) {
+        contentLoaded = true;
+        return;
+      }
+      ev.preventDefault();
+      api.transport.reply(ev.detail, {});
+    });
+
     for (const action of ACK_ACTIONS) {
       api.on(`action:${action}`, (ev: CustomEvent<IWidgetApiRequest>) => {
         ev.preventDefault();

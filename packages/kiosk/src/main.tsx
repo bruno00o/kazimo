@@ -1,6 +1,6 @@
 import type { KioskState } from "@kazimo/shared";
 import { tokens } from "@kazimo/shared";
-import { StrictMode } from "react";
+import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ScreenFor } from "./screens";
 import { KioskStateProvider, useKioskState } from "./state";
@@ -34,9 +34,35 @@ const FORCED: Record<string, KioskState> = {
 
 const forced = new URLSearchParams(location.search).get("state");
 
+const MAX_LAYERS = 3;
+
+function FadeStack({ state }: { state: KioskState }) {
+  const [layers, setLayers] = useState([{ key: 0, state }]);
+
+  useEffect(() => {
+    setLayers((prev) => {
+      const last = prev[prev.length - 1];
+      if (last?.state === state) return prev;
+      return [...prev, { key: (last?.key ?? 0) + 1, state }].slice(-MAX_LAYERS);
+    });
+    const timer = setTimeout(() => setLayers((prev) => prev.slice(-1)), tokens.fade.inMs);
+    return () => clearTimeout(timer);
+  }, [state]);
+
+  return (
+    <>
+      {layers.map((layer) => (
+        <div key={layer.key} className="layer">
+          <ScreenFor state={layer.state} />
+        </div>
+      ))}
+    </>
+  );
+}
+
 function App() {
   const { state } = useKioskState();
-  return <ScreenFor state={forced ? (FORCED[forced] ?? IDLE) : state} />;
+  return <FadeStack state={forced ? (FORCED[forced] ?? IDLE) : state} />;
 }
 
 const root = document.getElementById("root");

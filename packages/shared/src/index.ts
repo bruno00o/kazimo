@@ -32,7 +32,7 @@ export interface KioskConfig {
   homeserverUrl: string;
   userId: string;
   deviceId: string;
-  roomId: string;
+  roomId: string | null;
   lang: string;
   idleReturnSeconds: number;
   autoAnswerDelayMs: number;

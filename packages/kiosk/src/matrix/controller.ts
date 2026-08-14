@@ -14,6 +14,7 @@ import { plainMediaUrl } from "./media";
 import { loadRecentPhotos, photoFromEvent } from "./photos";
 
 const PHOTO_ROTATE_MS = 30_000;
+const PHOTO_POOL_SIZE = 20;
 
 interface RuntimeConfig extends KioskConfig {
   accessToken: string;
@@ -81,9 +82,15 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
     await new Promise<void>((resolve) => matrix.once(ClientEvent.Sync, () => resolve()));
     if (stopped) return;
 
-    await matrix.joinRoom(config.roomId).catch(() => {});
-    const room = matrix.getRoom(config.roomId);
-    if (!room) throw new Error(`room unavailable: ${config.roomId}`);
+    if (config.roomId) await matrix.joinRoom(config.roomId).catch(() => {});
+
+    const joinedRooms = () => matrix.getRooms().filter((r) => r.getMyMembership() === "join");
+
+    const reportUnencrypted = (room: Room) => {
+      if (!room.hasEncryptionStateEvent()) {
+        console.warn(`room without encryption: ${room.roomId} (${room.name})`);
+      }
+    };
 
     callHost = new CallHost(matrix, {
       userId: config.userId,
@@ -96,6 +103,10 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
     let photos: PhotoRef[] = [];
     let photoIndex = 0;
 
+    const addPhotos = (incoming: PhotoRef[]) => {
+      photos = [...incoming, ...photos].sort((a, b) => b.timestamp - a.timestamp).slice(0, PHOTO_POOL_SIZE);
+    };
+
     const show = (state: KioskState) => {
       mode = state.kind;
       callbacks.setState(state);
@@ -105,7 +116,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       show({ kind: "idle", photo: photos.length ? (photos[photoIndex % photos.length] ?? null) : null });
     };
 
-    const personFor = async (userId: string): Promise<Person> => {
+    const personFor = async (room: Room, userId: string): Promise<Person> => {
       const member = room.getMember(userId);
       const mxc = member?.getMxcAvatarUrl();
       return {
@@ -121,8 +132,8 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       }, config.idleReturnSeconds * 1000);
     };
 
-    const answer = async (callerId: string) => {
-      const caller = await personFor(callerId);
+    const answer = async (room: Room, callerId: string) => {
+      const caller = await personFor(room, callerId);
       if (stopped || mode === "in-call") return;
       show({ kind: "incoming-call", caller });
       later(async () => {
@@ -139,7 +150,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       }, config.autoAnswerDelayMs);
     };
 
-    const handleMessage = async (event: MatrixEvent) => {
+    const handleMessage = async (room: Room, event: MatrixEvent) => {
       await matrix.decryptEventIfNeeded(event);
       if (event.getType() !== "m.room.message") return;
       const content = event.getContent();
@@ -149,59 +160,78 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       if (content.msgtype === "m.image") {
         const photo = await photoFromEvent(matrix, event);
         if (!photo || stopped) return;
-        photos = [photo, ...photos];
+        addPhotos([photo]);
         photoIndex = 0;
         if (mode === "idle" || mode === "message") {
-          show({ kind: "message", from: await personFor(sender), photo });
+          show({ kind: "message", from: await personFor(room, sender), photo });
           scheduleIdleReturn();
         }
         return;
       }
 
       if (content.msgtype === "m.text" && (mode === "idle" || mode === "message")) {
-        show({ kind: "message", from: await personFor(sender), text: String(content.body ?? "") });
+        show({ kind: "message", from: await personFor(room, sender), text: String(content.body ?? "") });
         scheduleIdleReturn();
       }
     };
 
     matrix.on(RoomStateEvent.Events, (event: MatrixEvent) => {
-      if (stopped || event.getRoomId() !== room.roomId) return;
-      if (!RTC_MEMBER_TYPES.has(event.getType())) return;
+      if (stopped || !RTC_MEMBER_TYPES.has(event.getType())) return;
       const active = Object.keys(event.getContent()).length > 0;
       const sender = event.getSender();
       if (!active || !sender || sender === config.userId) return;
       if (callHost?.active || mode === "incoming-call" || mode === "in-call") return;
-      void answer(sender);
+      const roomId = event.getRoomId();
+      const room = roomId ? matrix.getRoom(roomId) : null;
+      if (room?.getMyMembership() !== "join") return;
+      void answer(room, sender);
     });
 
     matrix.on(
       RoomEvent.Timeline,
       (event: MatrixEvent, eventRoom: Room | undefined, toStartOfTimeline, _removed, data) => {
-        if (stopped || eventRoom?.roomId !== room.roomId) return;
+        if (stopped || !eventRoom || eventRoom.getMyMembership() !== "join") return;
         if (toStartOfTimeline || !data.liveEvent) return;
         if (event.getSender() === config.userId) return;
-        void handleMessage(event).catch(() => {});
+        void handleMessage(eventRoom, event).catch(() => {});
       },
     );
 
-    const ongoingCaller = () => {
-      for (const type of RTC_MEMBER_TYPES) {
-        for (const event of room.currentState.getStateEvents(type)) {
-          const sender = event.getSender();
-          if (sender && sender !== config.userId && Object.keys(event.getContent()).length > 0) {
-            return sender;
+    matrix.on(RoomEvent.MyMembership, (room: Room, membership: string) => {
+      if (stopped || membership !== "invite") return;
+      void matrix
+        .joinRoom(room.roomId)
+        .then(async (joined) => {
+          reportUnencrypted(joined);
+          addPhotos(await loadRecentPhotos(matrix, joined));
+          if (!stopped && mode === "idle") showIdle();
+        })
+        .catch((error) => console.error(`auto-join failed for ${room.roomId}`, error));
+    });
+
+    const ongoingCall = () => {
+      for (const room of joinedRooms()) {
+        for (const type of RTC_MEMBER_TYPES) {
+          for (const event of room.currentState.getStateEvents(type)) {
+            const sender = event.getSender();
+            if (sender && sender !== config.userId && Object.keys(event.getContent()).length > 0) {
+              return { room, sender };
+            }
           }
         }
       }
       return null;
     };
 
-    photos = await loadRecentPhotos(matrix, room);
-    if (stopped) return;
+    for (const room of joinedRooms()) {
+      reportUnencrypted(room);
+      addPhotos(await loadRecentPhotos(matrix, room));
+      if (stopped) return;
+    }
     showIdle();
 
-    const caller = ongoingCaller();
-    if (caller) void answer(caller);
+    const ongoing = ongoingCall();
+    if (ongoing) void answer(ongoing.room, ongoing.sender);
 
     const rotate = setInterval(() => {
       if (stopped || mode !== "idle" || photos.length < 2) return;

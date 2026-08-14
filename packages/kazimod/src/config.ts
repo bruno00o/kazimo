@@ -1,5 +1,5 @@
 import type { KioskConfig } from "@kazimo/shared";
-import { Config } from "effect";
+import { Config, Option } from "effect";
 
 export interface DaemonConfig extends KioskConfig {
   accessToken: string;
@@ -11,7 +11,7 @@ export const daemonConfig: Config.Config<DaemonConfig> = Config.all({
   userId: Config.string("KAZIMO_USER"),
   deviceId: Config.string("KAZIMO_DEVICE"),
   accessToken: Config.string("KAZIMO_TOKEN"),
-  roomId: Config.string("KAZIMO_ROOM"),
+  roomId: Config.string("KAZIMO_ROOM").pipe(Config.option, Config.map(Option.getOrNull)),
   lang: Config.withDefault(Config.string("KAZIMO_LANG"), "en"),
   idleReturnSeconds: Config.withDefault(Config.number("KAZIMO_IDLE_RETURN"), 30),
   autoAnswerDelayMs: Config.withDefault(Config.number("KAZIMO_AUTO_ANSWER_MS"), 3000),
