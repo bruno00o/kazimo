@@ -1,6 +1,7 @@
-import type { KioskState, Person, PhotoRef } from "@kazimo/shared";
+import type { A2uiNode, KioskState, Person, PhotoRef } from "@kazimo/shared";
 import { tokens } from "@kazimo/shared";
 import { useEffect, useState } from "react";
+import { A2uiView } from "./a2ui";
 import { stringsFor } from "./i18n";
 import { useKioskState } from "./state";
 
@@ -98,6 +99,14 @@ export function MessageScreen({ from, text, photo }: { from: Person; text?: stri
   );
 }
 
+export function AssistantScreen({ tree }: { tree: A2uiNode }) {
+  return (
+    <div className="screen theme-light">
+      <A2uiView tree={tree} />
+    </div>
+  );
+}
+
 export function DegradedScreen({
   reason,
   title,
@@ -130,6 +139,8 @@ export function ScreenFor({ state }: { state: KioskState }) {
       return <InCallScreen />;
     case "message":
       return <MessageScreen from={state.from} text={state.text} photo={state.photo} />;
+    case "assistant":
+      return <AssistantScreen tree={state.tree} />;
     case "degraded":
       return (
         <DegradedScreen

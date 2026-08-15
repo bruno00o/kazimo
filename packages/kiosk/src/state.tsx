@@ -1,5 +1,6 @@
 import type { KioskConfig, KioskState } from "@kazimo/shared";
 import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
+import { startAgent } from "./agent";
 import { startKiosk } from "./matrix/controller";
 
 const params = new URLSearchParams(location.search);
@@ -24,13 +25,17 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
           .then((c) => setLang(c.lang))
           .catch(() => {});
       }
-      return;
+      return startAgent((tree) => setState({ kind: "assistant", tree }));
     }
     const handle = startKiosk({
       setState,
       setLang: forcedLang ? () => {} : setLang,
     });
-    return handle.stop;
+    const stopAgent = startAgent(handle.showAssistant);
+    return () => {
+      stopAgent();
+      handle.stop();
+    };
   }, []);
 
   return <StateCtx.Provider value={{ state, setState, lang }}>{children}</StateCtx.Provider>;

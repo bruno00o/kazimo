@@ -141,9 +141,7 @@ async function searchReport(agent: AgentConfig, query: string): Promise<string> 
   if (!res.ok) throw new Error(`search failed (${res.status})`);
   const data = (await res.json()) as TavilyResponse;
   if (data.results.length === 0) return "The search returned no results.";
-  return data.results
-    .map((result) => `${result.title} (${result.url}): ${result.content}`)
-    .join(" | ");
+  return data.results.map((result) => `${result.title} (${result.url}): ${result.content}`).join(" | ");
 }
 
 const reportOrFallback = (run: () => Promise<string>, fallback: string) =>
@@ -201,10 +199,7 @@ export const AgentToolkitLayer = AgentToolkit.toLayer(
           "The weather service could not be reached right now.",
         ),
       News: () =>
-        reportOrFallback(
-          () => newsReport(config.agent),
-          "The news feeds could not be reached right now.",
-        ),
+        reportOrFallback(() => newsReport(config.agent), "The news feeds could not be reached right now."),
       Search: ({ query }) =>
         reportOrFallback(
           () => searchReport(config.agent, query),

@@ -1,9 +1,8 @@
-import type { KioskState } from "@kazimo/shared";
+import type { A2uiNode, KioskState } from "@kazimo/shared";
 import { tokens } from "@kazimo/shared";
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { startAgent } from "./agent";
-import { ScreenFor } from "./screens";
+import { AssistantScreen, ScreenFor } from "./screens";
 import { KioskStateProvider, useKioskState } from "./state";
 
 function cssVars(obj: object, prefix: string): [string, string][] {
@@ -18,6 +17,36 @@ for (const [name, value] of cssVars(tokens, "--kz")) {
 
 const IDLE: KioskState = { kind: "idle", photo: null };
 
+const ASSISTANT_FIXTURE: A2uiNode = {
+  kind: "column",
+  children: [
+    { kind: "title", text: "The weather this week" },
+    {
+      kind: "row",
+      children: [
+        {
+          kind: "card",
+          children: [
+            { kind: "number", value: "23", label: "today" },
+            { kind: "text", text: "sunny all day" },
+          ],
+        },
+        {
+          kind: "card",
+          children: [
+            { kind: "number", value: "17", label: "tomorrow" },
+            { kind: "text", text: "light rain" },
+          ],
+        },
+      ],
+    },
+    { kind: "divider" },
+    { kind: "step", index: 1, text: "Take the umbrella" },
+    { kind: "step", index: 2, text: "Leave before ten" },
+    { kind: "list", items: ["Monday market", "Tuesday visit", "Sunday lunch"] },
+  ],
+};
+
 const FORCED: Record<string, KioskState> = {
   idle: IDLE,
   incoming: {
@@ -31,6 +60,7 @@ const FORCED: Record<string, KioskState> = {
     text: "Thinking of you, see you Sunday!",
   },
   degraded: { kind: "degraded", reason: "dev" },
+  assistant: { kind: "assistant", tree: ASSISTANT_FIXTURE },
 };
 
 const forced = new URLSearchParams(location.search).get("state");
@@ -61,12 +91,64 @@ function FadeStack({ state }: { state: KioskState }) {
   );
 }
 
-function App() {
-  const { state } = useKioskState();
-  return <FadeStack state={forced ? (FORCED[forced] ?? IDLE) : state} />;
+interface BenchEntry {
+  question: string;
+  speech: string;
+  tree: A2uiNode | null;
+  ms: number;
 }
 
-startAgent();
+function GalleryScreen() {
+  const [entries, setEntries] = useState<BenchEntry[] | null>(null);
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    fetch("/api/bench")
+      .then((r) => (r.ok ? (r.json() as Promise<BenchEntry[]>) : []))
+      .then(setEntries)
+      .catch(() => setEntries([]));
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code === "ArrowRight") setIndex((i) => i + 1);
+      if (event.code === "ArrowLeft") setIndex((i) => i - 1);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  if (!entries) return null;
+  if (entries.length === 0) {
+    return (
+      <div className="screen theme-light">
+        <div className="soft">No bench results. Run: bun packages/kazimod/bench/run.ts</div>
+      </div>
+    );
+  }
+  const at = ((index % entries.length) + entries.length) % entries.length;
+  const entry = entries[at];
+  if (!entry) return null;
+  return (
+    <>
+      {entry.tree ? (
+        <AssistantScreen tree={entry.tree} />
+      ) : (
+        <div className="screen theme-light">
+          <div className="soft">{entry.speech || "(no tree, no speech)"}</div>
+        </div>
+      )}
+      <div className="hint">{`${at + 1}/${entries.length} | ${entry.question} | ${entry.ms}ms`}</div>
+    </>
+  );
+}
+
+function App() {
+  const { state } = useKioskState();
+  if (forced === "gallery") return <GalleryScreen />;
+  const shown = forced ? (state.kind === "assistant" ? state : (FORCED[forced] ?? IDLE)) : state;
+  return <FadeStack state={shown} />;
+}
 
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");

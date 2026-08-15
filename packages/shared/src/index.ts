@@ -1,4 +1,7 @@
+export type { A2uiNode } from "./a2ui";
 export { type Tokens, tokens } from "./tokens";
+
+import type { A2uiNode } from "./a2ui";
 
 export type KioskState =
   | { kind: "idle"; photo: PhotoRef | null }
@@ -7,7 +10,7 @@ export type KioskState =
   | { kind: "message"; from: Person; text?: string; photo?: PhotoRef }
   | { kind: "degraded"; reason: string }
   | { kind: "faces"; people: Person[]; focused: number }
-  | { kind: "assistant"; tree: unknown };
+  | { kind: "assistant"; tree: A2uiNode };
 
 export interface Person {
   userId: string;
@@ -24,7 +27,10 @@ export interface PhotoRef {
 
 export const CAPTURE_SAMPLE_RATE = 16000;
 
-export type DaemonToKiosk = { type: "state"; state: KioskState } | { type: "config"; config: KioskConfig };
+export type DaemonToKiosk =
+  | { type: "state"; state: KioskState }
+  | { type: "config"; config: KioskConfig }
+  | { type: "assistant"; tree: A2uiNode };
 
 export type KioskToDaemon =
   | { type: "ready" }

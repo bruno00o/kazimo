@@ -1,4 +1,4 @@
-import type { KioskConfig, KioskState, Person, PhotoRef } from "@kazimo/shared";
+import type { A2uiNode, KioskConfig, KioskState, Person, PhotoRef } from "@kazimo/shared";
 import { initAsync as initCryptoWasm } from "@matrix-org/matrix-sdk-crypto-wasm";
 import {
   ClientEvent,
@@ -33,7 +33,10 @@ export interface KioskCallbacks {
 
 export interface KioskHandle {
   stop: () => void;
+  showAssistant: (tree: A2uiNode) => void;
 }
+
+const INTERRUPTIBLE_MODES = new Set<KioskState["kind"]>(["idle", "message", "assistant"]);
 
 function waitForElement(id: string, timeoutMs = 2000): Promise<HTMLElement | null> {
   return new Promise((resolve) => {
@@ -52,6 +55,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
   let stopped = false;
   let client: MatrixClient | null = null;
   let callHost: CallHost | null = null;
+  let assistantSink: ((tree: A2uiNode) => void) | null = null;
   const timers = new Set<ReturnType<typeof setTimeout>>();
 
   const later = (fn: () => void, ms: number) => {
@@ -140,8 +144,14 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
 
     const scheduleIdleReturn = () => {
       later(() => {
-        if (mode === "message") showIdle();
+        if (mode === "message" || mode === "assistant") showIdle();
       }, config.idleReturnSeconds * 1000);
+    };
+
+    assistantSink = (tree) => {
+      if (stopped || !INTERRUPTIBLE_MODES.has(mode)) return;
+      show({ kind: "assistant", tree });
+      scheduleIdleReturn();
     };
 
     const answer = async (room: Room, callerId: string) => {
@@ -177,7 +187,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
         if (!photo || stopped) return;
         addPhotos([photo]);
         photoIndex = 0;
-        if (mode === "idle" || mode === "message") {
+        if (INTERRUPTIBLE_MODES.has(mode)) {
           show({ kind: "message", from: await personFor(room, sender), photo });
           playMessage();
           scheduleIdleReturn();
@@ -185,7 +195,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
         return;
       }
 
-      if (content.msgtype === "m.text" && (mode === "idle" || mode === "message")) {
+      if (content.msgtype === "m.text" && INTERRUPTIBLE_MODES.has(mode)) {
         show({ kind: "message", from: await personFor(room, sender), text: String(content.body ?? "") });
         playMessage();
         scheduleIdleReturn();
@@ -194,7 +204,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
 
     matrix.on(ClientEvent.Sync, (syncState) => {
       if (stopped) return;
-      if (String(syncState) === "ERROR" && (mode === "idle" || mode === "message")) {
+      if (String(syncState) === "ERROR" && INTERRUPTIBLE_MODES.has(mode)) {
         show({ kind: "degraded", reason: "offline" });
       }
       if (String(syncState) === "SYNCING" && mode === "degraded") showIdle();
@@ -296,10 +306,14 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
   return {
     stop() {
       stopped = true;
+      assistantSink = null;
       for (const timer of timers) clearTimeout(timer);
       timers.clear();
       void callHost?.hangup();
       client?.stopClient();
+    },
+    showAssistant(tree) {
+      assistantSink?.(tree);
     },
   };
 }

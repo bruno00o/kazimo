@@ -1,8 +1,8 @@
-import type { DaemonToKiosk } from "@kazimo/shared";
+import type { A2uiNode, DaemonToKiosk } from "@kazimo/shared";
 import { connectDaemon } from "./link";
 import { type MicCapture, startMicCapture } from "./mic";
 
-export function startAgent(): () => void {
+export function startAgent(onAssistant: (tree: A2uiNode) => void): () => void {
   let mic: string | null = null;
   let session: Promise<MicCapture | null> | null = null;
   let voice: { element: HTMLAudioElement; url: string } | null = null;
@@ -20,6 +20,7 @@ export function startAgent(): () => void {
 
   const link = connectDaemon((message: DaemonToKiosk) => {
     if (message.type === "config") mic = message.config.mic;
+    else if (message.type === "assistant") onAssistant(message.tree);
   }, play);
 
   const begin = () => {

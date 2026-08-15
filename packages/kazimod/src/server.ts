@@ -1,7 +1,8 @@
+import { appendFile, mkdir } from "node:fs/promises";
 import { CAPTURE_SAMPLE_RATE, type DaemonToKiosk, type KioskToDaemon } from "@kazimo/shared";
 import { Context, Effect, Layer, Schema } from "effect";
 import kioskPage from "../../kiosk/index.html";
-import { Agent } from "./agent";
+import { Agent, type AgentReply, type ComposedScreen } from "./agent";
 import { speak, transcribe } from "./ai";
 import { wavFromPcm16 } from "./audio";
 import { type DaemonConfig, daemonConfig } from "./config";
@@ -19,15 +20,28 @@ const CRYPTO_WASM = new URL(
 ).pathname;
 
 const CAPTURE_PATH = `${process.env.HOME}/.kazimo/last-capture.wav`;
+const A2UI_LOG_DIR = `${process.env.HOME}/.kazimo/logs`;
+const A2UI_JOURNAL_PATH = `${A2UI_LOG_DIR}/a2ui.jsonl`;
+const BENCH_RESULTS_PATH = `${process.env.HOME}/.kazimo/bench/latest.json`;
 
 const log = (message: string) => console.log(`[kazimod] ${new Date().toISOString()} ${message}`);
+
+const journal = (entry: object) =>
+  appendFile(A2UI_JOURNAL_PATH, `${JSON.stringify(entry)}\n`).catch((error) =>
+    log(`journal write failed: ${error}`),
+  );
 
 interface SocketData {
   id: number;
   capture: Uint8Array[] | null;
 }
 
-function start(config: DaemonConfig, ask: (question: string) => Promise<string>) {
+interface AgentBridge {
+  ask(question: string): Promise<AgentReply>;
+  compose(question: string, reports: string[], speech: string): Promise<ComposedScreen>;
+}
+
+function start(config: DaemonConfig, agent: AgentBridge) {
   const isDev = process.env.NODE_ENV !== "production";
   const { port: _port, ai: _ai, agent: _agent, ...kioskConfig } = config;
 
@@ -45,18 +59,39 @@ function start(config: DaemonConfig, ask: (question: string) => Promise<string>)
     if (!text.trim()) return;
 
     const askStarted = Date.now();
-    const reply = await ask(text);
-    log(`agent (${Date.now() - askStarted}ms): ${reply}`);
-    if (!reply.trim()) return;
+    const reply = await agent.ask(text);
+    log(`agent (${Date.now() - askStarted}ms): ${reply.speech}`);
+    if (!reply.speech.trim()) return;
+
+    const composeStarted = Date.now();
+    const composed = agent
+      .compose(text, reply.reports, reply.speech)
+      .then(async (screen) => {
+        const outcome = screen.tree ? "tree" : (screen.error ?? "null");
+        log(`composer (${Date.now() - composeStarted}ms): ${outcome}`);
+        await journal({
+          ts: new Date().toISOString(),
+          question: text,
+          reports: reply.reports,
+          speech: reply.speech,
+          tree: screen.tree,
+          error: screen.error,
+        });
+        if (!screen.tree) return;
+        const message: DaemonToKiosk = { type: "assistant", tree: screen.tree };
+        ws.send(JSON.stringify(message));
+      })
+      .catch((error) => log(`composer failed: ${error}`));
 
     const ttsStarted = Date.now();
-    const audio = await speak(config.ai, reply, config.lang);
-    if (!audio) {
+    const audio = await speak(config.ai, reply.speech, config.lang);
+    if (audio) {
+      log(`tts (${Date.now() - ttsStarted}ms): ${audio.byteLength} bytes`);
+      ws.send(audio);
+    } else {
       log(`tts skipped: no reference file and no catalog voice for "${config.lang}"`);
-      return;
     }
-    log(`tts (${Date.now() - ttsStarted}ms): ${audio.byteLength} bytes`);
-    ws.send(audio);
+    await composed;
   };
 
   return Bun.serve<SocketData>({
@@ -67,6 +102,14 @@ function start(config: DaemonConfig, ask: (question: string) => Promise<string>)
       "/": kioskPage,
 
       "/api/config": () => Response.json(kioskConfig),
+
+      ...(isDev && {
+        "/api/bench": async () => {
+          const results = Bun.file(BENCH_RESULTS_PATH);
+          if (!(await results.exists())) return new Response("no bench results", { status: 404 });
+          return new Response(results, { headers: { "content-type": "application/json" } });
+        },
+      }),
     },
 
     async fetch(req, srv) {
@@ -127,11 +170,16 @@ export class KioskServer extends Context.Service<
     Effect.gen(function* () {
       const config = yield* daemonConfig;
       const agent = yield* Agent;
-      const ask = (question: string) => Effect.runPromise(agent.ask(question));
+      const bridge: AgentBridge = {
+        ask: (question) => Effect.runPromise(agent.ask(question)),
+        compose: (question, reports, speech) => Effect.runPromise(agent.compose(question, reports, speech)),
+      };
+
+      yield* Effect.promise(() => mkdir(A2UI_LOG_DIR, { recursive: true }));
 
       const server = yield* Effect.acquireRelease(
         Effect.try({
-          try: () => start(config, ask),
+          try: () => start(config, bridge),
           catch: (cause) => new ServerStartError({ cause }),
         }),
         (running) => Effect.promise(() => running.stop()),
