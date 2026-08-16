@@ -6,6 +6,8 @@ import { Agent, type AgentReply, type ComposedScreen } from "./agent";
 import { speak, transcribe } from "./ai";
 import { wavFromPcm16 } from "./audio";
 import { type DaemonConfig, daemonConfig } from "./config";
+import { createListener, type Listener } from "./listen";
+import { defaultWakeModelPath, loadWakeModels, type WakeModels } from "./wake";
 
 export class ServerStartError extends Schema.TaggedError<ServerStartError>()("ServerStartError", {
   cause: Schema.Defect(),
@@ -34,6 +36,7 @@ const journal = (entry: object) =>
 interface SocketData {
   id: number;
   capture: Uint8Array[] | null;
+  listener: Listener | null;
 }
 
 interface AgentBridge {
@@ -41,9 +44,9 @@ interface AgentBridge {
   compose(question: string, reports: string[], speech: string): Promise<ComposedScreen>;
 }
 
-function start(config: DaemonConfig, agent: AgentBridge) {
+function start(config: DaemonConfig, agent: AgentBridge, wakeModels: WakeModels | null) {
   const isDev = process.env.NODE_ENV !== "production";
-  const { port: _port, ai: _ai, agent: _agent, ...kioskConfig } = config;
+  const { port: _port, ai: _ai, agent: _agent, wake: _wake, ...kioskConfig } = config;
 
   const respond = async (ws: Bun.ServerWebSocket<SocketData>, frames: Uint8Array[]) => {
     const pcm = Buffer.concat(frames);
@@ -115,7 +118,8 @@ function start(config: DaemonConfig, agent: AgentBridge) {
     async fetch(req, srv) {
       const p = new URL(req.url).pathname;
 
-      if (p === "/ws" && srv.upgrade(req, { data: { id: Date.now(), capture: null } })) return;
+      if (p === "/ws" && srv.upgrade(req, { data: { id: Date.now(), capture: null, listener: null } }))
+        return;
 
       if (p.endsWith("matrix_sdk_crypto_wasm_bg.wasm")) {
         return new Response(Bun.file(CRYPTO_WASM), {
@@ -134,22 +138,43 @@ function start(config: DaemonConfig, agent: AgentBridge) {
     websocket: {
       open(ws) {
         log(`kiosk connected (${ws.data.id})`);
+        if (wakeModels) {
+          ws.data.listener = createListener(wakeModels, config.wake.threshold, {
+            onWake() {
+              log("wake word detected");
+              const wake: DaemonToKiosk = { type: "wake" };
+              ws.send(JSON.stringify(wake));
+            },
+            onUtterance(frames) {
+              void respond(ws, frames).catch((error) => log(`agent pipeline failed: ${error}`));
+            },
+          });
+        }
         const hello: DaemonToKiosk = { type: "config", config: kioskConfig };
         ws.send(JSON.stringify(hello));
       },
       message(ws, raw) {
         if (typeof raw !== "string") {
-          ws.data.capture?.push(new Uint8Array(raw));
+          const frame = new Uint8Array(raw);
+          if (ws.data.listener) ws.data.listener.push(frame);
+          else ws.data.capture?.push(frame);
           return;
         }
         const msg = JSON.parse(raw) as KioskToDaemon;
         if (msg.type === "ready") log("kiosk reports ready");
         else if (msg.type === "event") log(`kiosk event: ${msg.name}`);
-        else if (msg.type === "capture-start") ws.data.capture = [];
-        else if (msg.type === "capture-end" && ws.data.capture) {
-          const frames = ws.data.capture;
-          ws.data.capture = null;
-          void respond(ws, frames).catch((error) => log(`agent pipeline failed: ${error}`));
+        else if (msg.type === "playback-start") ws.data.listener?.setSuppressed(true);
+        else if (msg.type === "playback-end") ws.data.listener?.setSuppressed(false);
+        else if (msg.type === "capture-start") {
+          if (ws.data.listener) ws.data.listener.forceStart();
+          else ws.data.capture = [];
+        } else if (msg.type === "capture-end") {
+          if (ws.data.listener) ws.data.listener.forceEnd();
+          else if (ws.data.capture) {
+            const frames = ws.data.capture;
+            ws.data.capture = null;
+            void respond(ws, frames).catch((error) => log(`agent pipeline failed: ${error}`));
+          }
         }
       },
       close(ws) {
@@ -177,9 +202,17 @@ export class KioskServer extends Context.Service<
 
       yield* Effect.promise(() => mkdir(A2UI_LOG_DIR, { recursive: true }));
 
+      const wakeModelPath = config.wake.modelPath ?? defaultWakeModelPath;
+      const wakeModels = yield* Effect.tryPromise(() => loadWakeModels(wakeModelPath)).pipe(
+        Effect.tap(() => Effect.log(`wake word listening with ${wakeModelPath}`)),
+        Effect.catch((error) =>
+          Effect.log(`wake word disabled, push-to-talk only: ${error.cause}`).pipe(Effect.as(null)),
+        ),
+      );
+
       const server = yield* Effect.acquireRelease(
         Effect.try({
-          try: () => start(config, bridge),
+          try: () => start(config, bridge, wakeModels),
           catch: (cause) => new ServerStartError({ cause }),
         }),
         (running) => Effect.promise(() => running.stop()),

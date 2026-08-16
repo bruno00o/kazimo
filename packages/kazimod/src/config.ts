@@ -20,11 +20,17 @@ export interface AgentConfig {
   searchKey: string | null;
 }
 
+export interface WakeConfig {
+  modelPath: string | null;
+  threshold: number;
+}
+
 export interface DaemonConfig extends KioskConfig {
   accessToken: string;
   recoveryPassphrase: string | null;
   ai: AiConfig;
   agent: AgentConfig;
+  wake: WakeConfig;
   port: number;
 }
 
@@ -74,6 +80,10 @@ export const daemonConfig: Config.Config<DaemonConfig> = Config.all({
     newsFeeds: optionalStringList("KAZIMO_NEWS_FEEDS"),
     searchUrl: Config.withDefault(Config.string("KAZIMO_SEARCH_URL"), "https://api.tavily.com/search"),
     searchKey: optionalString("KAZIMO_SEARCH_KEY"),
+  }),
+  wake: Config.all({
+    modelPath: optionalString("KAZIMO_WAKE_MODEL"),
+    threshold: Config.withDefault(Config.number("KAZIMO_WAKE_THRESHOLD"), 0.5),
   }),
   port: Config.withDefault(Config.number("KAZIMO_PORT"), 8080),
 });

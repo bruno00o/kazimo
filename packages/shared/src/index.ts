@@ -30,13 +30,16 @@ export const CAPTURE_SAMPLE_RATE = 16000;
 export type DaemonToKiosk =
   | { type: "state"; state: KioskState }
   | { type: "config"; config: KioskConfig }
-  | { type: "assistant"; tree: A2uiNode };
+  | { type: "assistant"; tree: A2uiNode }
+  | { type: "wake" };
 
 export type KioskToDaemon =
   | { type: "ready" }
   | { type: "event"; name: KioskEvent }
   | { type: "capture-start" }
-  | { type: "capture-end" };
+  | { type: "capture-end" }
+  | { type: "playback-start" }
+  | { type: "playback-end" };
 
 export type KioskEvent = "call-connected" | "call-ended" | "media-error";
 

@@ -68,3 +68,8 @@ export const playMessage = () => {
   tone(G5, 0, 1.2, 0.07);
   tone(D5, 0.12, 1.6, 0.05);
 };
+
+export const playWake = () => {
+  tone(E5, 0, 0.3, 0.07);
+  tone(G5, 0.1, 0.4, 0.07);
+};

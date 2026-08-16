@@ -4,6 +4,9 @@
   "workspaces": [
     "packages/*"
   ],
+  "trustedDependencies": [
+    "onnxruntime-node"
+  ],
   "scripts": {
     "dev": "bun run --watch packages/kazimod/src/index.ts",
     "start": "NODE_ENV=production bun run packages/kazimod/src/index.ts",
