@@ -1,5 +1,7 @@
+import type { ActivitySummary } from "@kazimo/shared";
 import { Effect, Schema } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
+import { KioskBridge } from "./bridge";
 import { type AgentConfig, daemonConfig } from "./config";
 
 const FETCH_TIMEOUT_MS = 5000;
@@ -182,11 +184,56 @@ const Search = Tool.make("Search", {
   success: Schema.Struct({ report: Schema.String }),
 });
 
-export const AgentToolkit = Toolkit.make(CurrentTime, Weather, News, Search);
+const UnreadMessages = Tool.make("UnreadMessages", {
+  description:
+    "List the messages and photos that arrived while the person was away or asleep. Use when asked about new or unread messages. Reading them marks them as seen.",
+  success: Schema.Struct({ report: Schema.String }),
+});
+
+const MissedCalls = Tool.make("MissedCalls", {
+  description:
+    "List the calls that rang without being answered. Use when asked who called or about missed calls. Reading them marks them as seen.",
+  success: Schema.Struct({ report: Schema.String }),
+});
+
+const AnswerCall = Tool.make("AnswerCall", {
+  description:
+    "Answer the incoming call that is ringing right now. Use when the person asks to pick up, answer or take the call.",
+  success: Schema.Struct({ report: Schema.String }),
+});
+
+export const AgentToolkit = Toolkit.make(
+  CurrentTime,
+  Weather,
+  News,
+  Search,
+  UnreadMessages,
+  MissedCalls,
+  AnswerCall,
+);
+
+const timeOf = (timestamp: number) =>
+  new Date(timestamp).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+
+const unreadReport = (activity: ActivitySummary) => {
+  if (activity.unread.length === 0) return "There are no unread messages.";
+  const lines = activity.unread.map((item) =>
+    item.kind === "photo"
+      ? `${item.from} sent a photo at ${timeOf(item.timestamp)}${item.body ? ` with the caption: ${item.body}` : ""}`
+      : `${item.from} wrote at ${timeOf(item.timestamp)}: ${item.body ?? ""}`,
+  );
+  return lines.join(" | ");
+};
+
+const missedReport = (activity: ActivitySummary) => {
+  if (activity.missed.length === 0) return "There are no missed calls.";
+  return activity.missed.map((call) => `${call.from} called at ${timeOf(call.timestamp)}`).join(" | ");
+};
 
 export const AgentToolkitLayer = AgentToolkit.toLayer(
   Effect.gen(function* () {
     const config = yield* daemonConfig;
+    const bridge = yield* KioskBridge;
     return AgentToolkit.of({
       CurrentTime: () =>
         Effect.sync(() => ({
@@ -205,6 +252,25 @@ export const AgentToolkitLayer = AgentToolkit.toLayer(
           () => searchReport(config.agent, query),
           "The web search could not be reached right now.",
         ),
+      UnreadMessages: () =>
+        Effect.sync(() => {
+          const report = unreadReport(bridge.activity());
+          bridge.clearActivity("unread");
+          return { report };
+        }),
+      MissedCalls: () =>
+        Effect.sync(() => {
+          const report = missedReport(bridge.activity());
+          bridge.clearActivity("missed");
+          return { report };
+        }),
+      AnswerCall: () =>
+        Effect.sync(() => {
+          const ringing = bridge.activity().ringing;
+          if (!ringing) return { report: "No call is ringing right now." };
+          bridge.send({ type: "answer-call" });
+          return { report: `Answering the call from ${ringing.from}.` };
+        }),
     });
   }),
 );

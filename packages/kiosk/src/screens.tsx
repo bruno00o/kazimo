@@ -1,7 +1,9 @@
-import type { A2uiNode, KioskState, Person, PhotoRef } from "@kazimo/shared";
+import type { A2uiNode, ActivitySummary, KioskState, Person, PhotoRef } from "@kazimo/shared";
 import { tokens } from "@kazimo/shared";
+import { MessageSquare, Phone } from "lucide-react";
 import { useEffect, useState } from "react";
 import { A2uiView } from "./a2ui";
+import { type BadgeGroup, badgeFor } from "./activity";
 import { stringsFor } from "./i18n";
 import { useKioskState } from "./state";
 
@@ -42,7 +44,61 @@ function Avatar({ person, size }: { person: Person; size: string }) {
   );
 }
 
-export function IdleScreen({ photo, locale }: { photo: PhotoRef | null; locale: string }) {
+const MAX_BADGE_NAMES = 2;
+
+const groupNames = (groups: BadgeGroup[], others: string) => {
+  const shown = groups
+    .slice(0, MAX_BADGE_NAMES)
+    .map((group) => group.name)
+    .join(", ");
+  return groups.length > MAX_BADGE_NAMES ? `${shown} ${others}` : shown;
+};
+
+function ActivityBadges({
+  activity,
+  hint,
+  others,
+}: {
+  activity?: ActivitySummary;
+  hint: string;
+  others: string;
+}) {
+  const badge = badgeFor(activity);
+  if (!badge) return null;
+  return (
+    <div className="activity-badges">
+      <div className="activity-pills">
+        {badge.missed.length > 0 && (
+          <div className="activity-pill">
+            <Phone fill="currentColor" />
+            <span>{groupNames(badge.missed, others)}</span>
+          </div>
+        )}
+        {badge.unread.length > 0 && (
+          <div className="activity-pill">
+            <MessageSquare fill="currentColor" />
+            <span>{groupNames(badge.unread, others)}</span>
+          </div>
+        )}
+      </div>
+      <div className="activity-hint">{hint}</div>
+    </div>
+  );
+}
+
+export function IdleScreen({
+  photo,
+  locale,
+  activity,
+  badgeHint,
+  badgeOthers,
+}: {
+  photo: PhotoRef | null;
+  locale: string;
+  activity?: ActivitySummary;
+  badgeHint: string;
+  badgeOthers: string;
+}) {
   if (photo) {
     return (
       <div className="screen theme-dark">
@@ -53,6 +109,7 @@ export function IdleScreen({ photo, locale }: { photo: PhotoRef | null; locale: 
             <div className="photo-caption">{photo.caption}</div>
           </>
         )}
+        <ActivityBadges activity={activity} hint={badgeHint} others={badgeOthers} />
       </div>
     );
   }
@@ -60,6 +117,7 @@ export function IdleScreen({ photo, locale }: { photo: PhotoRef | null; locale: 
     <div className="screen theme-dark">
       <Aurora periodMs={tokens.breath.idleMs} />
       <Clock locale={locale} />
+      <ActivityBadges activity={activity} hint={badgeHint} others={badgeOthers} />
     </div>
   );
 }
@@ -132,7 +190,15 @@ export function ScreenFor({ state }: { state: KioskState }) {
 
   switch (state.kind) {
     case "idle":
-      return <IdleScreen photo={state.photo} locale={strings.locale} />;
+      return (
+        <IdleScreen
+          photo={state.photo}
+          locale={strings.locale}
+          activity={state.activity}
+          badgeHint={strings.badgeHint}
+          badgeOthers={strings.badgeOthers}
+        />
+      );
     case "incoming-call":
       return <IncomingCallScreen caller={state.caller} verb={strings.incomingCall} />;
     case "in-call":
@@ -150,6 +216,13 @@ export function ScreenFor({ state }: { state: KioskState }) {
         />
       );
     default:
-      return <IdleScreen photo={null} locale={strings.locale} />;
+      return (
+        <IdleScreen
+          photo={null}
+          locale={strings.locale}
+          badgeHint={strings.badgeHint}
+          badgeOthers={strings.badgeOthers}
+        />
+      );
   }
 }

@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
-import { ManagedRuntime } from "effect";
+import { Layer, ManagedRuntime } from "effect";
 import { Agent } from "../src/agent";
+import { KioskBridge } from "../src/bridge";
 import questions from "./questions.json";
 
 const OUT_DIR = `${process.env.HOME}/.kazimo/bench`;
@@ -17,7 +18,7 @@ interface BenchEntry {
   ms: number;
 }
 
-const runtime = ManagedRuntime.make(Agent.layer);
+const runtime = ManagedRuntime.make(Agent.layer.pipe(Layer.provide(KioskBridge.layer)));
 
 async function attempt(question: string): Promise<BenchEntry> {
   const started = Date.now();

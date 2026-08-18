@@ -417,6 +417,64 @@
   justify-content: center;
 }
 
+.activity-badges {
+  position: fixed;
+  bottom: 2.5vh;
+  left: 3vh;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1vh;
+  z-index: 2;
+}
+
+.activity-pills {
+  display: flex;
+  gap: 1.5vh;
+}
+
+.activity-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 1.4vh;
+  padding: 1.2vh 2.6vh;
+  border-radius: var(--kz-radius-pill);
+  background: rgba(0, 0, 0, 0.45);
+  font-size: var(--kz-type-caption);
+  font-weight: var(--kz-weight-medium);
+  color: #ffffff;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.8);
+}
+
+.activity-pill svg {
+  width: 3.4vh;
+  height: 3.4vh;
+  flex: none;
+}
+
+.activity-hint {
+  padding-left: 1.5vh;
+  font-size: var(--kz-type-hint);
+  font-weight: var(--kz-weight-medium);
+  color: rgba(255, 255, 255, 0.75);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
+}
+
+.night-veil {
+  position: fixed;
+  inset: 0;
+  background: #000000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity calc(var(--kz-fade-inMs) * 1ms) ease;
+  z-index: 10;
+}
+
+.night-veil.veiled {
+  opacity: 1;
+  transition: opacity calc(var(--kz-fade-outMs) * 1ms) ease;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .aurora,
   .ring,

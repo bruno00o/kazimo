@@ -5,6 +5,7 @@ import kioskPage from "../../kiosk/index.html";
 import { Agent, type AgentReply, type ComposedScreen } from "./agent";
 import { speak, transcribe } from "./ai";
 import { wavFromPcm16 } from "./audio";
+import { KioskBridge, type KioskBridgeApi } from "./bridge";
 import { type DaemonConfig, daemonConfig } from "./config";
 import { createListener, type Listener } from "./listen";
 import { defaultWakeModelPath, loadWakeModels, type WakeModels } from "./wake";
@@ -44,7 +45,12 @@ interface AgentBridge {
   compose(question: string, reports: string[], speech: string): Promise<ComposedScreen>;
 }
 
-function start(config: DaemonConfig, agent: AgentBridge, wakeModels: WakeModels | null) {
+function start(
+  config: DaemonConfig,
+  agent: AgentBridge,
+  wakeModels: WakeModels | null,
+  bridge: KioskBridgeApi,
+) {
   const isDev = process.env.NODE_ENV !== "production";
   const { port: _port, ai: _ai, agent: _agent, wake: _wake, ...kioskConfig } = config;
 
@@ -138,6 +144,7 @@ function start(config: DaemonConfig, agent: AgentBridge, wakeModels: WakeModels 
     websocket: {
       open(ws) {
         log(`kiosk connected (${ws.data.id})`);
+        bridge.setSink((message) => ws.send(JSON.stringify(message)));
         if (wakeModels) {
           ws.data.listener = createListener(wakeModels, config.wake.threshold, {
             onWake() {
@@ -163,7 +170,13 @@ function start(config: DaemonConfig, agent: AgentBridge, wakeModels: WakeModels 
         const msg = JSON.parse(raw) as KioskToDaemon;
         if (msg.type === "ready") log("kiosk reports ready");
         else if (msg.type === "event") log(`kiosk event: ${msg.name}`);
-        else if (msg.type === "playback-start") ws.data.listener?.setSuppressed(true);
+        else if (msg.type === "activity") {
+          bridge.setActivity(msg.activity);
+          log(
+            `activity: ${msg.activity.unread.length} unread, ${msg.activity.missed.length} missed` +
+              (msg.activity.ringing ? `, ringing from ${msg.activity.ringing.from}` : ""),
+          );
+        } else if (msg.type === "playback-start") ws.data.listener?.setSuppressed(true);
         else if (msg.type === "playback-end") ws.data.listener?.setSuppressed(false);
         else if (msg.type === "capture-start") {
           if (ws.data.listener) ws.data.listener.forceStart();
@@ -179,6 +192,7 @@ function start(config: DaemonConfig, agent: AgentBridge, wakeModels: WakeModels 
       },
       close(ws) {
         log(`kiosk disconnected (${ws.data.id})`);
+        bridge.setSink(null);
       },
     },
   });
@@ -195,6 +209,7 @@ export class KioskServer extends Context.Service<
     Effect.gen(function* () {
       const config = yield* daemonConfig;
       const agent = yield* Agent;
+      const kioskBridge = yield* KioskBridge;
       const bridge: AgentBridge = {
         ask: (question) => Effect.runPromise(agent.ask(question)),
         compose: (question, reports, speech) => Effect.runPromise(agent.compose(question, reports, speech)),
@@ -212,7 +227,7 @@ export class KioskServer extends Context.Service<
 
       const server = yield* Effect.acquireRelease(
         Effect.try({
-          try: () => start(config, bridge, wakeModels),
+          try: () => start(config, bridge, wakeModels, kioskBridge),
           catch: (cause) => new ServerStartError({ cause }),
         }),
         (running) => Effect.promise(() => running.stop()),

@@ -40,6 +40,17 @@ const optionalString = (name: string) =>
 const optionalNumber = (name: string) =>
   Config.number(name).pipe(Config.option, Config.map(Option.getOrNull));
 
+const DEFAULT_NIGHT = { start: 22, end: 7 };
+
+const nightWindow = Config.string("KAZIMO_NIGHT").pipe(
+  Config.withDefault(`${DEFAULT_NIGHT.start}-${DEFAULT_NIGHT.end}`),
+  Config.map((raw) => {
+    const [start, end] = raw.split("-").map((part) => Number.parseInt(part.trim(), 10));
+    const valid = (h: number | undefined): h is number => h !== undefined && h >= 0 && h <= 23;
+    return valid(start) && valid(end) ? { start, end } : DEFAULT_NIGHT;
+  }),
+);
+
 const optionalStringList = (name: string) =>
   Config.string(name).pipe(
     Config.map((raw) =>
@@ -64,6 +75,8 @@ export const daemonConfig: Config.Config<DaemonConfig> = Config.all({
   lang: Config.withDefault(Config.string("KAZIMO_LANG"), "en"),
   idleReturnSeconds: Config.withDefault(Config.number("KAZIMO_IDLE_RETURN"), 30),
   autoAnswerDelayMs: Config.withDefault(Config.number("KAZIMO_AUTO_ANSWER_MS"), 3000),
+  nightStartHour: nightWindow.pipe(Config.map((window) => window.start)),
+  nightEndHour: nightWindow.pipe(Config.map((window) => window.end)),
   ai: Config.all({
     baseUrl: Config.withDefault(Config.string("KAZIMO_AI_BASE_URL"), "https://api.mistral.ai/v1"),
     key: optionalString("KAZIMO_AI_KEY"),

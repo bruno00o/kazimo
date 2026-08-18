@@ -4,13 +4,33 @@ export { type Tokens, tokens } from "./tokens";
 import type { A2uiNode } from "./a2ui";
 
 export type KioskState =
-  | { kind: "idle"; photo: PhotoRef | null }
+  | { kind: "idle"; photo: PhotoRef | null; activity?: ActivitySummary }
   | { kind: "incoming-call"; caller: Person }
   | { kind: "in-call"; caller: Person }
   | { kind: "message"; from: Person; text?: string; photo?: PhotoRef }
   | { kind: "degraded"; reason: string }
   | { kind: "faces"; people: Person[]; focused: number }
   | { kind: "assistant"; tree: A2uiNode };
+
+export interface UnreadItem {
+  userId: string;
+  from: string;
+  kind: "text" | "photo";
+  body: string | null;
+  timestamp: number;
+}
+
+export interface MissedCall {
+  userId: string;
+  from: string;
+  timestamp: number;
+}
+
+export interface ActivitySummary {
+  unread: UnreadItem[];
+  missed: MissedCall[];
+  ringing: { from: string } | null;
+}
 
 export interface Person {
   userId: string;
@@ -31,7 +51,9 @@ export type DaemonToKiosk =
   | { type: "state"; state: KioskState }
   | { type: "config"; config: KioskConfig }
   | { type: "assistant"; tree: A2uiNode }
-  | { type: "wake" };
+  | { type: "wake" }
+  | { type: "answer-call" }
+  | { type: "activity-clear"; what: "unread" | "missed" };
 
 export type KioskToDaemon =
   | { type: "ready" }
@@ -39,7 +61,8 @@ export type KioskToDaemon =
   | { type: "capture-start" }
   | { type: "capture-end" }
   | { type: "playback-start" }
-  | { type: "playback-end" };
+  | { type: "playback-end" }
+  | { type: "activity"; activity: ActivitySummary };
 
 export type KioskEvent = "call-connected" | "call-ended" | "media-error";
 
@@ -53,4 +76,6 @@ export interface KioskConfig {
   lang: string;
   idleReturnSeconds: number;
   autoAnswerDelayMs: number;
+  nightStartHour: number;
+  nightEndHour: number;
 }

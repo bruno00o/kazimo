@@ -49,6 +49,18 @@ const ASSISTANT_FIXTURE: A2uiNode = {
 
 const FORCED: Record<string, KioskState> = {
   idle: IDLE,
+  badge: {
+    kind: "idle",
+    photo: null,
+    activity: {
+      unread: [
+        { userId: "@rui", from: "Rui", kind: "text", body: "Bom dia!", timestamp: 0 },
+        { userId: "@rui", from: "Rui", kind: "photo", body: null, timestamp: 0 },
+      ],
+      missed: [{ userId: "@maria", from: "Maria", timestamp: 0 }],
+      ringing: null,
+    },
+  },
   incoming: {
     kind: "incoming-call",
     caller: { userId: "@demo", displayName: "Anna", avatarUrl: null },
@@ -144,10 +156,16 @@ function GalleryScreen() {
 }
 
 function App() {
-  const { state } = useKioskState();
+  const { state, night } = useKioskState();
   if (forced === "gallery") return <GalleryScreen />;
   const shown = forced ? (state.kind === "assistant" ? state : (FORCED[forced] ?? IDLE)) : state;
-  return <FadeStack state={shown} />;
+  const veiled = night && shown.kind === "idle";
+  return (
+    <>
+      <FadeStack state={shown} />
+      <div className={veiled ? "night-veil veiled" : "night-veil"} />
+    </>
+  );
 }
 
 const root = document.getElementById("root");

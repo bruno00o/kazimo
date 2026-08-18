@@ -1,35 +1,56 @@
-import type { A2uiNode, DaemonToKiosk } from "@kazimo/shared";
+import type { A2uiNode, ActivitySummary, DaemonToKiosk } from "@kazimo/shared";
 import { connectDaemon } from "./link";
 import { type MicCapture, startMicCapture } from "./mic";
 import { playWake } from "./sounds";
 
-export function startAgent(onAssistant: (tree: A2uiNode) => void): () => void {
+export interface AgentCallbacks {
+  onAssistant: (tree: A2uiNode) => void;
+  onAnswerCall: () => void;
+  onActivityClear: (what: "unread" | "missed") => void;
+}
+
+export interface AgentHandle {
+  stop: () => void;
+  sendActivity: (activity: ActivitySummary) => void;
+  setCallActive: (active: boolean) => void;
+}
+
+export function startAgent(callbacks: AgentCallbacks): AgentHandle {
   let mic: string | null = null;
   let session: Promise<MicCapture | null> | null = null;
   let voice: { element: HTMLAudioElement; url: string } | null = null;
-  let playing = false;
+  let voicePlaying = false;
+  let callActive = false;
+  let suppressed = false;
+  let lastActivity: ActivitySummary | null = null;
 
-  const signalPlayback = (started: boolean) => {
-    if (playing === started) return;
-    playing = started;
-    link.send({ type: started ? "playback-start" : "playback-end" });
+  const updateSuppression = () => {
+    const next = voicePlaying || callActive;
+    if (suppressed === next) return;
+    suppressed = next;
+    link.send({ type: next ? "playback-start" : "playback-end" });
+  };
+
+  const setVoicePlaying = (playing: boolean) => {
+    voicePlaying = playing;
+    updateSuppression();
   };
 
   const play = (audio: ArrayBuffer) => {
     if (voice) {
       voice.element.pause();
       URL.revokeObjectURL(voice.url);
-      signalPlayback(false);
+      setVoicePlaying(false);
     }
     const url = URL.createObjectURL(new Blob([audio], { type: "audio/mpeg" }));
     const element = new Audio(url);
     voice = { element, url };
-    element.onplay = () => signalPlayback(true);
-    element.onended = () => signalPlayback(false);
-    element.onerror = () => signalPlayback(false);
+    element.onplay = () => setVoicePlaying(true);
+    element.onended = () => setVoicePlaying(false);
+    element.onerror = () => setVoicePlaying(false);
     element.play().catch((error) => {
       console.error("speech playback failed", error);
-      signalPlayback(false);
+      setVoicePlaying(false);
     });
   };
 
@@ -46,8 +67,11 @@ export function startAgent(onAssistant: (tree: A2uiNode) => void): () => void {
     if (message.type === "config") {
       mic = message.config.mic;
       startMic();
-    } else if (message.type === "assistant") onAssistant(message.tree);
+      if (lastActivity) link.send({ type: "activity", activity: lastActivity });
+    } else if (message.type === "assistant") callbacks.onAssistant(message.tree);
     else if (message.type === "wake") playWake();
+    else if (message.type === "answer-call") callbacks.onAnswerCall();
+    else if (message.type === "activity-clear") callbacks.onActivityClear(message.what);
   }, play);
 
   const onKeyDown = (event: KeyboardEvent) => {
@@ -62,11 +86,21 @@ export function startAgent(onAssistant: (tree: A2uiNode) => void): () => void {
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
 
-  return () => {
-    window.removeEventListener("keydown", onKeyDown);
-    window.removeEventListener("keyup", onKeyUp);
-    void session?.then((capture) => capture?.stop());
-    session = null;
-    link.stop();
+  return {
+    stop() {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      void session?.then((capture) => capture?.stop());
+      session = null;
+      link.stop();
+    },
+    sendActivity(activity) {
+      lastActivity = activity;
+      link.send({ type: "activity", activity });
+    },
+    setCallActive(active) {
+      callActive = active;
+      updateSuppression();
+    },
   };
 }
