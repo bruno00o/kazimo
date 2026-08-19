@@ -1,5 +1,10 @@
 import { appendFile, mkdir } from "node:fs/promises";
-import { CAPTURE_SAMPLE_RATE, type DaemonToKiosk, type KioskToDaemon } from "@kazimo/shared";
+import {
+  type Announcement,
+  CAPTURE_SAMPLE_RATE,
+  type DaemonToKiosk,
+  type KioskToDaemon,
+} from "@kazimo/shared";
 import { Context, Effect, Layer, Schema } from "effect";
 import kioskPage from "../../kiosk/index.html";
 import { Agent, type AgentReply, type ComposedScreen } from "./agent";
@@ -37,6 +42,25 @@ const BENCH_RESULTS_PATH = `${process.env.HOME}/.kazimo/bench/latest.json`;
 
 const log = (message: string) => console.log(`[kazimod] ${new Date().toISOString()} ${message}`);
 
+const ANNOUNCE_MAX_CHARS = 300;
+
+function announcementText(lang: string, announcement: Announcement): string {
+  const body = announcement.body ? announcement.body.slice(0, ANNOUNCE_MAX_CHARS) : null;
+  const from = announcement.from;
+  const language = lang.split("-")[0];
+  if (announcement.kind === "photo") {
+    const base =
+      language === "pt"
+        ? `${from} enviou uma foto`
+        : language === "fr"
+          ? `${from} a envoyé une photo`
+          : `${from} sent a photo`;
+    return body ? `${base}: ${body}` : `${base}.`;
+  }
+  const said = language === "pt" ? "escreveu" : language === "fr" ? "a écrit" : "wrote";
+  return `${from} ${said}: ${body ?? ""}`;
+}
+
 const journal = (entry: object) =>
   appendFile(A2UI_JOURNAL_PATH, `${JSON.stringify(entry)}\n`).catch((error) =>
     log(`journal write failed: ${error}`),
@@ -46,6 +70,7 @@ interface SocketData {
   id: number;
   capture: Uint8Array[] | null;
   listener: Listener | null;
+  suppressFollowup: boolean;
 }
 
 interface AgentBridge {
@@ -87,37 +112,48 @@ function start(
 
     const askStarted = Date.now();
     const reply = await agent.ask(text);
+    for (const report of reply.reports) log(`tool: ${report}`);
     log(`agent (${Date.now() - askStarted}ms): ${reply.speech}`);
     if (!reply.speech.trim()) return;
 
     const composeStarted = Date.now();
-    const composed = agent
-      .compose(text, reply.reports, reply.speech)
-      .then(async (screen) => {
-        const outcome = screen.tree ? "tree" : (screen.error ?? "null");
-        log(`composer (${Date.now() - composeStarted}ms): ${outcome}`);
-        const tree = screen.tree
-          ? await resolveImages(screen.tree, imageUrlsIn(reply.reports), cacheImage)
-          : null;
-        if (screen.tree && !tree) log("composer tree dropped: images unresolved");
-        await journal({
+    const composed = reply.screenClaimed
+      ? journal({
           ts: new Date().toISOString(),
           question: text,
           reports: reply.reports,
           speech: reply.speech,
-          tree,
-          error: screen.error,
-        });
-        if (!tree) return;
-        const message: DaemonToKiosk = { type: "assistant", tree };
-        ws.send(JSON.stringify(message));
-      })
-      .catch((error) => log(`composer failed: ${error}`));
+          tree: null,
+          claimed: true,
+        })
+      : agent
+          .compose(text, reply.reports, reply.speech)
+          .then(async (screen) => {
+            const outcome = screen.tree ? "tree" : (screen.error ?? "null");
+            log(`composer (${Date.now() - composeStarted}ms): ${outcome}`);
+            const tree = screen.tree
+              ? await resolveImages(screen.tree, imageUrlsIn(reply.reports), cacheImage)
+              : null;
+            if (screen.tree && !tree) log("composer tree dropped: images unresolved");
+            await journal({
+              ts: new Date().toISOString(),
+              question: text,
+              reports: reply.reports,
+              speech: reply.speech,
+              tree,
+              error: screen.error,
+            });
+            if (!tree) return;
+            const message: DaemonToKiosk = { type: "assistant", tree };
+            ws.send(JSON.stringify(message));
+          })
+          .catch((error) => log(`composer failed: ${error}`));
 
     const ttsStarted = Date.now();
     const audio = await speak(config.ai, reply.speech, config.lang);
     if (audio) {
       log(`tts (${Date.now() - ttsStarted}ms): ${audio.byteLength} bytes`);
+      ws.data.suppressFollowup = reply.final;
       ws.send(audio);
     } else {
       log(`tts skipped: no reference file and no catalog voice for "${config.lang}"`);
@@ -146,7 +182,12 @@ function start(
     async fetch(req, srv) {
       const p = new URL(req.url).pathname;
 
-      if (p === "/ws" && srv.upgrade(req, { data: { id: Date.now(), capture: null, listener: null } }))
+      if (
+        p === "/ws" &&
+        srv.upgrade(req, {
+          data: { id: Date.now(), capture: null, listener: null, suppressFollowup: false },
+        })
+      )
         return;
 
       if (p.startsWith(IMAGE_ROUTE_PREFIX)) {
@@ -208,10 +249,27 @@ function start(
             `activity: ${msg.activity.unread.length} unread, ${msg.activity.missed.length} missed` +
               (msg.activity.ringing ? `, ringing from ${msg.activity.ringing.from}` : ""),
           );
+        } else if (msg.type === "contacts") {
+          bridge.setContacts(msg.contacts);
+          log(`contacts: ${msg.contacts.map((contact) => contact.displayName).join(", ") || "none"}`);
+        } else if (msg.type === "history" || msg.type === "photos-result") {
+          bridge.resolveRequest(msg);
+        } else if (msg.type === "announce") {
+          if (config.ai.key) {
+            const text = announcementText(config.lang, msg.announcement);
+            void speak(config.ai, text, config.lang)
+              .then((audio) => {
+                if (audio) ws.send(audio);
+              })
+              .catch((error) => log(`announce failed: ${error}`));
+          }
         } else if (msg.type === "playback-start") ws.data.listener?.setSuppressed(true);
         else if (msg.type === "playback-end") {
           ws.data.listener?.setSuppressed(false);
-          if (ws.data.listener && agent.conversationAlive()) {
+          const settled = ws.data.suppressFollowup;
+          ws.data.suppressFollowup = false;
+          if (settled) log("follow-up skipped: exchange settled");
+          else if (ws.data.listener && agent.conversationAlive()) {
             log("follow-up window open");
             ws.data.listener.openFollowup();
           }

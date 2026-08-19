@@ -1,4 +1,15 @@
-import type { A2uiNode, ActivitySummary, KioskConfig, KioskState, Person, PhotoRef } from "@kazimo/shared";
+import type {
+  A2uiNode,
+  ActivitySummary,
+  Announcement,
+  Contact,
+  HistoryMessage,
+  KioskConfig,
+  KioskState,
+  Person,
+  PhotoRef,
+  PhotosResult,
+} from "@kazimo/shared";
 import { initAsync as initCryptoWasm } from "@matrix-org/matrix-sdk-crypto-wasm";
 import {
   ClientEvent,
@@ -9,13 +20,21 @@ import {
   RoomEvent,
   RoomStateEvent,
 } from "matrix-js-sdk";
-import { cleared, emptyActivity, withMissed, withoutMissedFrom, withRinging, withUnread } from "../activity";
+import {
+  cleared,
+  emptyActivity,
+  withMissed,
+  withoutMissedFrom,
+  withoutUnreadFrom,
+  withRinging,
+  withUnread,
+} from "../activity";
 import { isNightAt } from "../night";
 import { playConnected, playEnded, playMessage, startRinging, stopRinging } from "../sounds";
-import { CallHost, RTC_MEMBER_TYPES } from "./call";
+import { CallHost, type CallIntent, RTC_MEMBER_TYPES } from "./call";
 import { ensureCryptoIdentity, secretStorageCallbacks } from "./crypto";
 import { plainMediaUrl } from "./media";
-import { loadRecentPhotos, photoFromEvent } from "./photos";
+import { captionOf, loadRecentPhotos, photoFromEvent } from "./photos";
 
 const PHOTO_ROTATE_MS = 30_000;
 const PHOTO_POOL_SIZE = 20;
@@ -36,6 +55,8 @@ export interface KioskCallbacks {
   setLang: (lang: string) => void;
   setNight: (night: boolean) => void;
   reportActivity: (activity: ActivitySummary) => void;
+  reportContacts: (contacts: Contact[]) => void;
+  announce: (announcement: Announcement) => void;
 }
 
 export interface KioskHandle {
@@ -43,6 +64,10 @@ export interface KioskHandle {
   showAssistant: (tree: A2uiNode) => void;
   answerCall: () => void;
   clearActivity: (what: "unread" | "missed") => void;
+  placeCall: (roomId: string) => void;
+  sendMessage: (roomId: string, text: string) => void;
+  showPhotos: (userId: string | null) => Promise<PhotosResult>;
+  history: (roomId: string, limit: number) => Promise<HistoryMessage[]>;
 }
 
 const INTERRUPTIBLE_MODES = new Set<KioskState["kind"]>(["idle", "message", "assistant"]);
@@ -67,6 +92,10 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
   let assistantSink: ((tree: A2uiNode) => void) | null = null;
   let answerSink: (() => void) | null = null;
   let clearSink: ((what: "unread" | "missed") => void) | null = null;
+  let placeCallSink: ((roomId: string) => void) | null = null;
+  let sendMessageSink: ((roomId: string, text: string) => void) | null = null;
+  let showPhotosSink: ((userId: string | null) => Promise<PhotosResult>) | null = null;
+  let historySink: ((roomId: string, limit: number) => Promise<HistoryMessage[]>) | null = null;
   const timers = new Set<ReturnType<typeof setTimeout>>();
 
   const later = (fn: () => void, ms: number) => {
@@ -129,6 +158,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
     let photos: PhotoRef[] = [];
     let photoIndex = 0;
     let activity = emptyActivity();
+    const pendingReads = new Map<string, MatrixEvent>();
     let night = isNightAt(new Date(), config.nightStartHour, config.nightEndHour);
     let ringing: { roomId: string; sender: string; caller: Person } | null = null;
 
@@ -192,21 +222,49 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       scheduleIdleReturn();
     };
 
-    const connect = async (room: Room, caller: Person) => {
-      if (stopped || !callHost || mode === "in-call") return;
-      ringing = null;
-      show({ kind: "in-call", caller });
-      setActivity(withRinging(withoutMissedFrom(activity, caller.userId), null));
+    const mountCall = async (room: Room, person: Person, intent: CallIntent) => {
+      if (!callHost) return false;
+      show({ kind: "in-call", caller: person });
       const container = await waitForElement("call-container");
       if (!container || stopped) {
         showIdle();
-        return;
+        return false;
       }
-      callHost.mount(room.roomId, container, () => {
-        playEnded();
-        if (!stopped) showIdle();
-      });
-      playConnected();
+      callHost.mount(
+        room.roomId,
+        container,
+        () => {
+          playEnded();
+          if (!stopped) showIdle();
+        },
+        intent,
+      );
+      return true;
+    };
+
+    const connect = async (room: Room, caller: Person) => {
+      if (stopped || !callHost || mode === "in-call") return;
+      ringing = null;
+      setActivity(withRinging(withoutMissedFrom(activity, caller.userId), null));
+      if (await mountCall(room, caller, "join_existing_dm")) playConnected();
+    };
+
+    const placeCall = async (roomId: string) => {
+      if (stopped || !callHost || callHost.active || !INTERRUPTIBLE_MODES.has(mode)) return;
+      const room = matrix.getRoom(roomId);
+      if (room?.getMyMembership() !== "join") return;
+      const calleeId = room
+        .getJoinedMembers()
+        .map((member) => member.userId)
+        .find((id) => id !== config.userId);
+      if (!calleeId) return;
+      await mountCall(room, await personFor(room, calleeId), "start_call_dm");
+    };
+
+    placeCallSink = (roomId) => void placeCall(roomId);
+
+    sendMessageSink = (roomId, text) => {
+      void matrix.sendTextMessage(roomId, text).catch((error) => console.error("send message failed", error));
     };
 
     const miss = () => {
@@ -247,7 +305,75 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
     };
 
     clearSink = (what) => {
-      if (!stopped) setActivity(cleared(activity, what));
+      if (stopped) return;
+      if (what === "unread") {
+        for (const event of pendingReads.values()) {
+          void matrix.sendReadReceipt(event).catch(() => {});
+        }
+        pendingReads.clear();
+      }
+      setActivity(cleared(activity, what));
+    };
+
+    showPhotosSink = async (userId) => {
+      const nothing: PhotosResult = { shown: 0, from: null, timestamp: null };
+      if (stopped || !INTERRUPTIBLE_MODES.has(mode)) return nothing;
+      const pool = userId ? photos.filter((photo) => photo.sender === userId) : photos;
+      const photo = pool.find((candidate) => candidate.sender !== null);
+      const sender = photo?.sender;
+      if (!photo || !sender) return nothing;
+      const room = joinedRooms().find((candidate) => candidate.getMember(sender));
+      const from = room
+        ? await personFor(room, sender)
+        : { userId: sender, displayName: sender, avatarUrl: null };
+      show({ kind: "message", from, photo });
+      scheduleIdleReturn();
+      return { shown: 1, from: from.displayName, timestamp: photo.timestamp };
+    };
+
+    historySink = async (roomId, limit) => {
+      const room = matrix.getRoom(roomId);
+      if (room?.getMyMembership() !== "join") return [];
+      const events = room.getLiveTimeline().getEvents();
+      const messages: HistoryMessage[] = [];
+      let latestRead: MatrixEvent | null = null;
+      const senders = new Set<string>();
+      for (const event of [...events].reverse()) {
+        if (messages.length >= limit) break;
+        const sender = event.getSender();
+        if (!sender || sender === config.userId) continue;
+        await matrix.decryptEventIfNeeded(event);
+        if (event.getType() !== "m.room.message") continue;
+        const content = event.getContent();
+        const from = room.getMember(sender)?.name ?? sender;
+        if (content.msgtype === "m.text") {
+          messages.push({
+            from,
+            kind: "text",
+            body: String(content.body ?? "").slice(0, UNREAD_BODY_MAX_CHARS),
+            timestamp: event.getTs(),
+          });
+        } else if (content.msgtype === "m.image") {
+          messages.push({
+            from,
+            kind: "photo",
+            body: captionOf(content.body as string | undefined),
+            timestamp: event.getTs(),
+          });
+        } else {
+          continue;
+        }
+        latestRead ??= event;
+        senders.add(sender);
+      }
+      if (latestRead) {
+        void matrix.sendReadReceipt(latestRead).catch(() => {});
+        pendingReads.delete(roomId);
+      }
+      let remaining = activity;
+      for (const sender of senders) remaining = withoutUnreadFrom(remaining, sender);
+      if (remaining !== activity) setActivity(remaining);
+      return messages.reverse();
     };
 
     const handleMessage = async (room: Room, event: MatrixEvent) => {
@@ -258,6 +384,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       if (!sender) return;
 
       const recordUnread = (kind: "text" | "photo", body: string | null) => {
+        pendingReads.set(room.roomId, event);
         setActivity(
           withUnread(activity, {
             userId: sender,
@@ -269,6 +396,15 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
         );
       };
 
+      const display = async (kind: "text" | "photo", body: string | null, photo?: PhotoRef) => {
+        const from = await personFor(room, sender);
+        show(photo ? { kind: "message", from, photo } : { kind: "message", from, text: body ?? "" });
+        playMessage();
+        scheduleIdleReturn();
+        void matrix.sendReadReceipt(event).catch(() => {});
+        callbacks.announce({ from: from.displayName, kind, body });
+      };
+
       if (content.msgtype === "m.image") {
         const photo = await photoFromEvent(matrix, event);
         if (!photo || stopped) return;
@@ -277,9 +413,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
         if (night || !INTERRUPTIBLE_MODES.has(mode)) {
           recordUnread("photo", photo.caption);
         } else {
-          show({ kind: "message", from: await personFor(room, sender), photo });
-          playMessage();
-          scheduleIdleReturn();
+          await display("photo", photo.caption, photo);
         }
         return;
       }
@@ -289,12 +423,37 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
         if (night || !INTERRUPTIBLE_MODES.has(mode)) {
           recordUnread("text", body);
         } else {
-          show({ kind: "message", from: await personFor(room, sender), text: body });
-          playMessage();
-          scheduleIdleReturn();
+          await display("text", body);
         }
       }
     };
+
+    let lastContacts = "";
+    const reportContacts = () => {
+      const byUser = new Map<string, { contact: Contact; lastActive: number }>();
+      for (const room of joinedRooms()) {
+        const members = room.getJoinedMembers();
+        if (members.length !== 2) continue;
+        const other = members.find((member) => member.userId !== config.userId);
+        if (!other) continue;
+        const lastActive = room.getLastActiveTimestamp();
+        const known = byUser.get(other.userId);
+        if (known && known.lastActive >= lastActive) continue;
+        byUser.set(other.userId, {
+          contact: { userId: other.userId, displayName: other.name, roomId: room.roomId },
+          lastActive,
+        });
+      }
+      const snapshot = [...byUser.values()].map((entry) => entry.contact);
+      const encoded = JSON.stringify(snapshot);
+      if (encoded === lastContacts) return;
+      lastContacts = encoded;
+      callbacks.reportContacts(snapshot);
+    };
+
+    matrix.on(RoomStateEvent.Members, () => {
+      if (!stopped) reportContacts();
+    });
 
     matrix.on(ClientEvent.Sync, (syncState) => {
       if (stopped) return;
@@ -342,7 +501,9 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
         .then(async (joined) => {
           reportUnencrypted(joined);
           addPhotos(await loadRecentPhotos(matrix, joined));
-          if (!stopped && mode === "idle") showIdle();
+          if (stopped) return;
+          reportContacts();
+          if (mode === "idle") showIdle();
         })
         .catch((error) => console.error(`auto-join failed for ${room.roomId}`, error));
     });
@@ -366,6 +527,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       addPhotos(await loadRecentPhotos(matrix, room));
       if (stopped) return;
     }
+    reportContacts();
     showIdle();
 
     const ongoing = ongoingCall();
@@ -407,6 +569,10 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       assistantSink = null;
       answerSink = null;
       clearSink = null;
+      placeCallSink = null;
+      sendMessageSink = null;
+      showPhotosSink = null;
+      historySink = null;
       for (const timer of timers) clearTimeout(timer);
       timers.clear();
       void callHost?.hangup();
@@ -420,6 +586,20 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
     },
     clearActivity(what) {
       clearSink?.(what);
+    },
+    placeCall(roomId) {
+      placeCallSink?.(roomId);
+    },
+    sendMessage(roomId, text) {
+      sendMessageSink?.(roomId, text);
+    },
+    showPhotos(userId) {
+      return showPhotosSink
+        ? showPhotosSink(userId)
+        : Promise.resolve({ shown: 0, from: null, timestamp: null });
+    },
+    history(roomId, limit) {
+      return historySink ? historySink(roomId, limit) : Promise.resolve([]);
     },
   };
 }

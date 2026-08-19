@@ -2,6 +2,9 @@ import type { PhotoRef } from "@kazimo/shared";
 import type { MatrixClient, MatrixEvent, Room } from "matrix-js-sdk";
 import { type EncryptedFile, encryptedMediaUrl, plainMediaUrl } from "./media";
 
+export const captionOf = (body: string | undefined): string | null =>
+  body && !/\.(jpe?g|png|gif|webp|heic)$/i.test(body) ? body : null;
+
 export async function photoFromEvent(client: MatrixClient, event: MatrixEvent): Promise<PhotoRef | null> {
   await client.decryptEventIfNeeded(event);
   if (event.getType() !== "m.room.message") return null;
@@ -17,8 +20,7 @@ export async function photoFromEvent(client: MatrixClient, event: MatrixEvent): 
       : null;
   if (!url) return null;
 
-  const body = content.body as string | undefined;
-  const caption = body && !/\.(jpe?g|png|gif|webp|heic)$/i.test(body) ? body : null;
+  const caption = captionOf(content.body as string | undefined);
 
   return {
     url,

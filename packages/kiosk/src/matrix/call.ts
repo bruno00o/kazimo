@@ -22,6 +22,8 @@ export interface CallHostConfig {
   lang: string;
 }
 
+export type CallIntent = "join_existing_dm" | "start_call_dm";
+
 const ACK_ACTIONS = ["io.element.device_mute", "io.element.tile_layout", "io.element.join"];
 
 export const RTC_MEMBER_TYPES = new Set([
@@ -44,13 +46,18 @@ export class CallHost {
     return this.api !== null;
   }
 
-  mount(roomId: string, container: HTMLElement, onEnded: () => void): void {
+  mount(
+    roomId: string,
+    container: HTMLElement,
+    onEnded: () => void,
+    intent: CallIntent = "join_existing_dm",
+  ): void {
     if (this.api) return;
 
     const iframe = document.createElement("iframe");
     iframe.allow = "camera; microphone; autoplay; display-capture; clipboard-write;";
     iframe.style.cssText = "position:absolute;inset:0;width:100%;height:100%;border:0;";
-    iframe.src = this.callUrl(roomId);
+    iframe.src = this.callUrl(roomId, intent);
     container.appendChild(iframe);
     this.iframe = iframe;
 
@@ -152,7 +159,7 @@ export class CallHost {
     this.api = null;
   }
 
-  private callUrl(roomId: string): string {
+  private callUrl(roomId: string, intent: CallIntent): string {
     const encrypted = this.client.getRoom(roomId)?.hasEncryptionStateEvent() ?? false;
     const params = new URLSearchParams({
       widgetId: "kazimo-call",
@@ -161,7 +168,7 @@ export class CallHost {
       deviceId: this.config.deviceId,
       roomId,
       baseUrl: this.config.homeserverUrl,
-      intent: "join_existing_dm",
+      intent,
       header: "none",
       showControls: "false",
       hideScreensharing: "true",

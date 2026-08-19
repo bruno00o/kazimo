@@ -28,10 +28,14 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
           .then((c) => setLang(c.lang))
           .catch(() => {});
       }
-      const agent = startAgent({
+      const agent: AgentHandle = startAgent({
         onAssistant: (tree) => setState({ kind: "assistant", tree }),
         onAnswerCall: () => {},
         onActivityClear: () => {},
+        onPlaceCall: () => {},
+        onSendMessage: () => {},
+        onShowPhotos: (id) => agent.sendPhotosResult(id, { shown: 0, from: null, timestamp: null }),
+        onHistoryRequest: (id) => agent.sendHistory(id, []),
       });
       return agent.stop;
     }
@@ -45,11 +49,21 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
       setLang: forcedLang ? () => {} : setLang,
       setNight: forcedNight ? () => {} : setNight,
       reportActivity: (activity) => agent?.sendActivity(activity),
+      reportContacts: (contacts) => agent?.sendContacts(contacts),
+      announce: (announcement) => agent?.sendAnnounce(announcement),
     });
     agent = startAgent({
       onAssistant: handle.showAssistant,
       onAnswerCall: handle.answerCall,
       onActivityClear: handle.clearActivity,
+      onPlaceCall: handle.placeCall,
+      onSendMessage: handle.sendMessage,
+      onShowPhotos: (id, userId) => {
+        void handle.showPhotos(userId).then((result) => agent?.sendPhotosResult(id, result));
+      },
+      onHistoryRequest: (id, roomId, limit) => {
+        void handle.history(roomId, limit).then((messages) => agent?.sendHistory(id, messages));
+      },
     });
     return () => {
       agent?.stop();

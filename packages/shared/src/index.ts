@@ -45,6 +45,31 @@ export interface PhotoRef {
   timestamp: number;
 }
 
+export interface Contact {
+  userId: string;
+  displayName: string;
+  roomId: string;
+}
+
+export interface HistoryMessage {
+  from: string;
+  kind: "text" | "photo";
+  body: string | null;
+  timestamp: number;
+}
+
+export interface PhotosResult {
+  shown: number;
+  from: string | null;
+  timestamp: number | null;
+}
+
+export interface Announcement {
+  from: string;
+  kind: "text" | "photo";
+  body: string | null;
+}
+
 export const CAPTURE_SAMPLE_RATE = 16000;
 
 export type DaemonToKiosk =
@@ -53,7 +78,11 @@ export type DaemonToKiosk =
   | { type: "assistant"; tree: A2uiNode }
   | { type: "wake" }
   | { type: "answer-call" }
-  | { type: "activity-clear"; what: "unread" | "missed" };
+  | { type: "activity-clear"; what: "unread" | "missed" }
+  | { type: "place-call"; roomId: string }
+  | { type: "send-message"; roomId: string; text: string }
+  | { type: "show-photos"; id: number; userId: string | null }
+  | { type: "history-request"; id: number; roomId: string; limit: number };
 
 export type KioskToDaemon =
   | { type: "ready" }
@@ -62,7 +91,13 @@ export type KioskToDaemon =
   | { type: "capture-end" }
   | { type: "playback-start" }
   | { type: "playback-end" }
-  | { type: "activity"; activity: ActivitySummary };
+  | { type: "activity"; activity: ActivitySummary }
+  | { type: "announce"; announcement: Announcement }
+  | { type: "contacts"; contacts: Contact[] }
+  | { type: "history"; id: number; messages: HistoryMessage[] }
+  | { type: "photos-result"; id: number; result: PhotosResult };
+
+export type KioskReply = Extract<KioskToDaemon, { type: "history" } | { type: "photos-result" }>;
 
 export type KioskEvent = "call-connected" | "call-ended" | "media-error";
 

@@ -1,4 +1,4 @@
-import type { ActivitySummary } from "@kazimo/shared";
+import type { ActivitySummary, Contact, HistoryMessage, UnreadItem } from "@kazimo/shared";
 import { Effect, Schema } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
 import { KioskBridge } from "./bridge";
@@ -278,10 +278,63 @@ const MissedCalls = Tool.make("MissedCalls", {
   success: Schema.Struct({ report: Schema.String }),
 });
 
+const ScreenReport = Schema.Struct({
+  report: Schema.String,
+  screen: Schema.optionalKey(Schema.Boolean),
+});
+
 const AnswerCall = Tool.make("AnswerCall", {
   description:
     "Answer the incoming call that is ringing right now. Use when the person asks to pick up, answer or take the call.",
+  success: ScreenReport,
+});
+
+const Contacts = Tool.make("Contacts", {
+  description: "List the people this device can call or message.",
   success: Schema.Struct({ report: Schema.String }),
+});
+
+const PlaceCall = Tool.make("PlaceCall", {
+  description: "Start a video call to a known contact. Use when the person asks to call or talk to someone.",
+  parameters: Schema.Struct({
+    name: Schema.String.annotate({ description: "The name of the person to call" }),
+  }),
+  success: ScreenReport,
+});
+
+const SendMessage = Tool.make("SendMessage", {
+  description:
+    "Send a text message to a known contact. Only call this after repeating the exact message aloud and hearing the person confirm it.",
+  parameters: Schema.Struct({
+    to: Schema.String.annotate({ description: "The name of the person to write to" }),
+    text: Schema.String.annotate({
+      description: "The confirmed message, in the language the person dictated it",
+    }),
+  }),
+  success: Schema.Struct({
+    report: Schema.String,
+    done: Schema.optionalKey(Schema.Boolean),
+  }),
+});
+
+const ReadMessagesFrom = Tool.make("ReadMessagesFrom", {
+  description:
+    "Read back the latest messages one person sent, including ones already seen. Use when asked what someone said or wrote.",
+  parameters: Schema.Struct({
+    name: Schema.String.annotate({ description: "The name of the person whose messages to read" }),
+  }),
+  success: Schema.Struct({ report: Schema.String }),
+});
+
+const ShowPhotos = Tool.make("ShowPhotos", {
+  description:
+    "Put the latest photo the family sent on the screen, optionally from one person. Use when asked to see their photos.",
+  parameters: Schema.Struct({
+    from: Schema.optionalKey(
+      Schema.String.annotate({ description: "A person's name, only when the person asks for theirs" }),
+    ),
+  }),
+  success: ScreenReport,
 });
 
 export const AgentToolkit = Toolkit.make(
@@ -293,25 +346,64 @@ export const AgentToolkit = Toolkit.make(
   UnreadMessages,
   MissedCalls,
   AnswerCall,
+  Contacts,
+  PlaceCall,
+  SendMessage,
+  ReadMessagesFrom,
+  ShowPhotos,
 );
 
 const timeOf = (timestamp: number) =>
   new Date(timestamp).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 
+const messageLine = (item: UnreadItem | HistoryMessage) =>
+  item.kind === "photo"
+    ? `${item.from} sent a photo at ${timeOf(item.timestamp)}${item.body ? ` with the caption: ${item.body}` : ""}`
+    : `${item.from} wrote at ${timeOf(item.timestamp)}: ${item.body ?? ""}`;
+
 const unreadReport = (activity: ActivitySummary) => {
   if (activity.unread.length === 0) return "There are no unread messages.";
-  const lines = activity.unread.map((item) =>
-    item.kind === "photo"
-      ? `${item.from} sent a photo at ${timeOf(item.timestamp)}${item.body ? ` with the caption: ${item.body}` : ""}`
-      : `${item.from} wrote at ${timeOf(item.timestamp)}: ${item.body ?? ""}`,
-  );
-  return lines.join(" | ");
+  return activity.unread.map(messageLine).join(" | ");
 };
 
 const missedReport = (activity: ActivitySummary) => {
   if (activity.missed.length === 0) return "There are no missed calls.";
   return activity.missed.map((call) => `${call.from} called at ${timeOf(call.timestamp)}`).join(" | ");
 };
+
+const normalized = (name: string) => name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+
+export const matchContacts = (contacts: Contact[], name: string): Contact[] => {
+  const query = normalized(name.trim());
+  if (!query) return [];
+  const exact = contacts.filter((contact) => normalized(contact.displayName) === query);
+  if (exact.length > 0) return exact;
+  const byFirstName = contacts.filter((contact) => normalized(contact.displayName).split(/\s+/)[0] === query);
+  if (byFirstName.length > 0) return byFirstName;
+  return contacts.filter((contact) => normalized(contact.displayName).includes(query));
+};
+
+const contactNames = (contacts: Contact[]) => contacts.map((contact) => contact.displayName).join(", ");
+
+type ContactMatch = { contact: Contact; report: null } | { contact: null; report: string };
+
+const resolveContact = (contacts: Contact[], name: string): ContactMatch => {
+  if (contacts.length === 0) return { contact: null, report: "No contacts are known yet." };
+  const matches = matchContacts(contacts, name);
+  if (matches.length === 0) {
+    return { contact: null, report: `No contact called ${name} is known on this device.` };
+  }
+  if (matches.length > 1) {
+    return {
+      contact: null,
+      report: `Several contacts match ${name}: ${contactNames(matches)}. Ask which one is meant.`,
+    };
+  }
+  return { contact: matches[0] as Contact, report: null };
+};
+
+const HISTORY_LIMIT = 5;
+const SCREEN_OFFLINE = "The screen is not connected right now.";
 
 export const AgentToolkitLayer = AgentToolkit.toLayer(
   Effect.gen(function* () {
@@ -357,7 +449,84 @@ export const AgentToolkitLayer = AgentToolkit.toLayer(
           const ringing = bridge.activity().ringing;
           if (!ringing) return { report: "No call is ringing right now." };
           bridge.send({ type: "answer-call" });
-          return { report: `Answering the call from ${ringing.from}.` };
+          return { report: `Answering the call from ${ringing.from}.`, screen: true };
+        }),
+      Contacts: () =>
+        Effect.sync(() => {
+          const contacts = bridge.contacts();
+          return {
+            report: contacts.length
+              ? `The known contacts are: ${contactNames(contacts)}.`
+              : "No contacts are known yet.",
+          };
+        }),
+      PlaceCall: ({ name }) =>
+        Effect.sync(() => {
+          const ringing = bridge.activity().ringing;
+          if (ringing) {
+            return { report: `A call from ${ringing.from} is already ringing; answer that one instead.` };
+          }
+          const match = resolveContact(bridge.contacts(), name);
+          if (!match.contact) return { report: match.report };
+          if (!bridge.send({ type: "place-call", roomId: match.contact.roomId })) {
+            return { report: SCREEN_OFFLINE };
+          }
+          return { report: `Calling ${match.contact.displayName} now.`, screen: true };
+        }),
+      SendMessage: ({ to, text }) =>
+        Effect.sync(() => {
+          const match = resolveContact(bridge.contacts(), to);
+          if (!match.contact) return { report: match.report };
+          if (!bridge.send({ type: "send-message", roomId: match.contact.roomId, text })) {
+            return { report: SCREEN_OFFLINE };
+          }
+          return { report: `The message to ${match.contact.displayName} was sent.`, done: true };
+        }),
+      ReadMessagesFrom: ({ name }) =>
+        Effect.promise(async () => {
+          const match = resolveContact(bridge.contacts(), name);
+          if (!match.contact) return { report: match.report };
+          const contact = match.contact;
+          const reply = await bridge.request((id) => ({
+            type: "history-request",
+            id,
+            roomId: contact.roomId,
+            limit: HISTORY_LIMIT,
+          }));
+          if (reply?.type !== "history") {
+            return { report: "The messages could not be read right now." };
+          }
+          if (reply.messages.length === 0) {
+            return { report: `There are no recent messages from ${contact.displayName}.` };
+          }
+          return { report: reply.messages.map(messageLine).join(" | ") };
+        }),
+      ShowPhotos: ({ from }) =>
+        Effect.promise(async () => {
+          let contact: Contact | null = null;
+          if (from) {
+            const match = resolveContact(bridge.contacts(), from);
+            if (!match.contact) return { report: match.report };
+            contact = match.contact;
+          }
+          const reply = await bridge.request((id) => ({
+            type: "show-photos",
+            id,
+            userId: contact?.userId ?? null,
+          }));
+          if (reply?.type !== "photos-result") {
+            return { report: "The photos could not be shown right now." };
+          }
+          if (reply.result.shown === 0) {
+            return {
+              report: contact
+                ? `There are no photos from ${contact.displayName} on the device.`
+                : "There are no photos on the device yet.",
+            };
+          }
+          const sender = reply.result.from ? ` from ${reply.result.from}` : "";
+          const sentAt = reply.result.timestamp ? `, sent at ${timeOf(reply.result.timestamp)},` : "";
+          return { report: `The latest photo${sender}${sentAt} is now on the screen.`, screen: true };
         }),
     });
   }),

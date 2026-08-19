@@ -61,6 +61,13 @@ const systemPrompt = (lang: string) =>
   `If no tool covers the question, or a tool reports it is not configured or unreachable, say plainly that you cannot check that, and never improvise an answer from memory. ` +
   `When you answer from search results, state only what the results actually say; if they do not settle the question, say so. ` +
   `Saying you do not know is always a good answer; a confident wrong answer never is. ` +
+  `You can reach the family through your tools: Contacts lists who is known, PlaceCall starts a video call, ` +
+  `SendMessage sends a written message, ReadMessagesFrom reads back what one person wrote, ShowPhotos puts a photo they sent on the screen. ` +
+  `Use these tools directly, without asking permission and without claiming not to know a name before the tool has said so. ` +
+  `To send a message: as soon as you have the recipient and the message, even both in one sentence, repeat the message once and ask whether to send it; ` +
+  `at the first yes call SendMessage. One confirmation exactly: never a second one, and never re-ask for something already said. ` +
+  `The message is always the person's own words: if they have not said what to write, ask what the message should be, and never invent or embellish its content. ` +
+  `If a tool reports a name matches nobody, say so instead of guessing. ` +
   `Never give medical advice: no diagnosis, no medication guidance, no reassurance about symptoms. ` +
   `If a question touches health, say it is one for a doctor and suggest calling a close family member to talk about it. ` +
   `If the person sounds hurt, unwell or in danger, tell them to call someone for help right now.`;
@@ -106,6 +113,8 @@ const parseComposerReply = (text: string): A2uiNode | null => {
 export interface AgentReply {
   speech: string;
   reports: string[];
+  screenClaimed: boolean;
+  final: boolean;
 }
 
 interface Conversation {
@@ -159,6 +168,8 @@ export class Agent extends Context.Service<
         const reports: string[] = [];
         let prompt: Prompt.MessageEncoded[] = [{ role: "user", content: [{ type: "text", text: question }] }];
         let speech = "";
+        let screenClaimed = false;
+        let final = false;
         for (let turn = 0; turn < MAX_AGENT_TURNS; turn++) {
           const response = yield* kept.session.generateText({ prompt, toolkit });
           prompt = [];
@@ -166,6 +177,8 @@ export class Agent extends Context.Service<
             const result = part.result as Record<string, unknown>;
             const report = typeof result.report === "string" ? result.report : JSON.stringify(result);
             reports.push(`${part.name}: ${report}`);
+            if (result.screen === true) screenClaimed = true;
+            if (result.done === true) final = true;
           }
           if (response.toolCalls.length === 0) {
             speech = response.text;
@@ -174,7 +187,7 @@ export class Agent extends Context.Service<
         }
         kept.lastUsed = Date.now();
         kept.exchanges += 1;
-        return { speech, reports };
+        return { speech, reports, screenClaimed, final };
       }, Effect.provide(model));
 
       const conversationAlive = () => Effect.sync(() => liveConversation() !== null);

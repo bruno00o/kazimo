@@ -25,6 +25,11 @@ export const withoutMissedFrom = (activity: ActivitySummary, userId: string): Ac
   missed: activity.missed.filter((call) => call.userId !== userId),
 });
 
+export const withoutUnreadFrom = (activity: ActivitySummary, userId: string): ActivitySummary => ({
+  ...activity,
+  unread: activity.unread.filter((item) => item.userId !== userId),
+});
+
 export const cleared = (activity: ActivitySummary, what: "unread" | "missed"): ActivitySummary => ({
   ...activity,
   [what]: [],

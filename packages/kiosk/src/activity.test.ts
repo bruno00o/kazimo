@@ -5,6 +5,7 @@ import {
   emptyActivity,
   withMissed,
   withoutMissedFrom,
+  withoutUnreadFrom,
   withRinging,
   withUnread,
 } from "./activity";
@@ -32,6 +33,13 @@ describe("activity", () => {
     activity = withMissed(activity, { userId: "@rui", from: "Rui", timestamp: 2 });
     const after = withoutMissedFrom(activity, "@maria");
     expect(after.missed.map((c) => c.from)).toEqual(["Rui"]);
+  });
+
+  test("reading one person's messages clears their unread only", () => {
+    let activity = withUnread(emptyActivity(), textFrom("@rui", "Rui"));
+    activity = withUnread(activity, textFrom("@maria", "Maria"));
+    const after = withoutUnreadFrom(activity, "@rui");
+    expect(after.unread.map((item) => item.from)).toEqual(["Maria"]);
   });
 
   test("badge groups are ordered by most recent sender", () => {
