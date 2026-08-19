@@ -51,6 +51,8 @@ interface SocketData {
 interface AgentBridge {
   ask(question: string): Promise<AgentReply>;
   compose(question: string, reports: string[], speech: string): Promise<ComposedScreen>;
+  conversationAlive(): boolean;
+  endConversation(): void;
 }
 
 function start(
@@ -60,7 +62,15 @@ function start(
   bridge: KioskBridgeApi,
 ) {
   const isDev = process.env.NODE_ENV !== "production";
-  const { port: _port, ai: _ai, agent: _agent, wake: _wake, ...kioskConfig } = config;
+  const {
+    port: _port,
+    ai: _ai,
+    agent: _agent,
+    wake: _wake,
+    chatTtlMs: _chatTtl,
+    followupWindowMs: _followup,
+    ...kioskConfig
+  } = config;
 
   const respond = async (ws: Bun.ServerWebSocket<SocketData>, frames: Uint8Array[]) => {
     const pcm = Buffer.concat(frames);
@@ -162,16 +172,21 @@ function start(
         log(`kiosk connected (${ws.data.id})`);
         bridge.setSink((message) => ws.send(JSON.stringify(message)));
         if (wakeModels) {
-          ws.data.listener = createListener(wakeModels, config.wake.threshold, {
-            onWake() {
-              log("wake word detected");
-              const wake: DaemonToKiosk = { type: "wake" };
-              ws.send(JSON.stringify(wake));
+          ws.data.listener = createListener(
+            wakeModels,
+            config.wake.threshold,
+            {
+              onWake() {
+                log("wake word detected");
+                const wake: DaemonToKiosk = { type: "wake" };
+                ws.send(JSON.stringify(wake));
+              },
+              onUtterance(frames) {
+                void respond(ws, frames).catch((error) => log(`agent pipeline failed: ${error}`));
+              },
             },
-            onUtterance(frames) {
-              void respond(ws, frames).catch((error) => log(`agent pipeline failed: ${error}`));
-            },
-          });
+            config.followupWindowMs,
+          );
         }
         const hello: DaemonToKiosk = { type: "config", config: kioskConfig };
         ws.send(JSON.stringify(hello));
@@ -188,13 +203,19 @@ function start(
         else if (msg.type === "event") log(`kiosk event: ${msg.name}`);
         else if (msg.type === "activity") {
           bridge.setActivity(msg.activity);
+          if (msg.activity.ringing) agent.endConversation();
           log(
             `activity: ${msg.activity.unread.length} unread, ${msg.activity.missed.length} missed` +
               (msg.activity.ringing ? `, ringing from ${msg.activity.ringing.from}` : ""),
           );
         } else if (msg.type === "playback-start") ws.data.listener?.setSuppressed(true);
-        else if (msg.type === "playback-end") ws.data.listener?.setSuppressed(false);
-        else if (msg.type === "capture-start") {
+        else if (msg.type === "playback-end") {
+          ws.data.listener?.setSuppressed(false);
+          if (ws.data.listener && agent.conversationAlive()) {
+            log("follow-up window open");
+            ws.data.listener.openFollowup();
+          }
+        } else if (msg.type === "capture-start") {
           if (ws.data.listener) ws.data.listener.forceStart();
           else ws.data.capture = [];
         } else if (msg.type === "capture-end") {
@@ -229,6 +250,8 @@ export class KioskServer extends Context.Service<
       const bridge: AgentBridge = {
         ask: (question) => Effect.runPromise(agent.ask(question)),
         compose: (question, reports, speech) => Effect.runPromise(agent.compose(question, reports, speech)),
+        conversationAlive: () => Effect.runSync(agent.conversationAlive()),
+        endConversation: () => Effect.runSync(agent.endConversation()),
       };
 
       yield* Effect.promise(() => mkdir(A2UI_LOG_DIR, { recursive: true }));

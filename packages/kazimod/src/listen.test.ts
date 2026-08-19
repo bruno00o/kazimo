@@ -102,6 +102,75 @@ describe("createListener", () => {
     expect(wakes.length).toBe(0);
   });
 
+  test("follow-up window captures speech without a wake word", async () => {
+    const wakes: number[] = [];
+    const utterances: Uint8Array[][] = [];
+    const listener = createListener(
+      stubModels({ scores: Array(40).fill(0), speechFrames: new Set([0, 1, 2]) }),
+      0.5,
+      { onWake: () => wakes.push(1), onUtterance: (frames) => utterances.push(frames) },
+    );
+    listener.openFollowup();
+    for (let i = 0; i < 30; i++) {
+      listener.push(frame(i));
+      await flush();
+    }
+    expect(wakes.length).toBe(0);
+    expect(utterances.length).toBe(1);
+  });
+
+  test("follow-up window closes silently when nobody speaks", async () => {
+    const wakes: number[] = [];
+    const utterances: Uint8Array[][] = [];
+    const listener = createListener(
+      stubModels({ scores: Array(40).fill(0), speechFrames: new Set() }),
+      0.5,
+      { onWake: () => wakes.push(1), onUtterance: (frames) => utterances.push(frames) },
+      1600,
+    );
+    listener.openFollowup();
+    for (let i = 0; i < 30; i++) {
+      listener.push(frame(i));
+      await flush();
+    }
+    expect(wakes.length).toBe(0);
+    expect(utterances.length).toBe(0);
+  });
+
+  test("follow-up window trims waiting silence so late speech keeps a full window", async () => {
+    const utterances: Uint8Array[][] = [];
+    const listener = createListener(
+      stubModels({ scores: Array(80).fill(0), speechFrames: new Set([40, 41, 42]) }),
+      0.5,
+      { onWake: () => {}, onUtterance: (frames) => utterances.push(frames) },
+      8000,
+    );
+    listener.openFollowup();
+    for (let i = 0; i < 70; i++) {
+      listener.push(frame(i));
+      await flush();
+    }
+    expect(utterances.length).toBe(1);
+    expect(utterances[0]?.length).toBeLessThan(30);
+  });
+
+  test("follow-up window does not open during push to talk", async () => {
+    const utterances: Uint8Array[][] = [];
+    const listener = createListener(stubModels({ scores: [], speechFrames: new Set() }), 0.5, {
+      onWake: () => {},
+      onUtterance: (frames) => utterances.push(frames),
+    });
+    listener.forceStart();
+    listener.openFollowup();
+    listener.push(frame(1));
+    listener.push(frame(2));
+    await flush();
+    listener.forceEnd();
+    await flush();
+    expect(utterances.length).toBe(1);
+    expect(utterances[0]?.length).toBe(2);
+  });
+
   test("ignores frames with unexpected size", async () => {
     const wakes: number[] = [];
     const listener = createListener(

@@ -46,6 +46,7 @@ const clientLayer = Layer.unwrap(
 
 const MAX_AGENT_TURNS = 5;
 const MAX_COMPOSER_ATTEMPTS = 2;
+const MAX_CONVERSATION_EXCHANGES = 10;
 
 const systemPrompt = (lang: string) =>
   `You are Kazimo, a friendly voice assistant for an elderly person. ` +
@@ -107,6 +108,12 @@ export interface AgentReply {
   reports: string[];
 }
 
+interface Conversation {
+  session: Chat.Service;
+  lastUsed: number;
+  exchanges: number;
+}
+
 export interface ComposedScreen {
   tree: A2uiNode | null;
   error: string | null;
@@ -116,6 +123,8 @@ export class Agent extends Context.Service<
   Agent,
   {
     ask(question: string): Effect.Effect<AgentReply, AiError.AiError>;
+    conversationAlive(): Effect.Effect<boolean>;
+    endConversation(): Effect.Effect<void>;
     compose(
       question: string,
       reports: string[],
@@ -130,23 +139,50 @@ export class Agent extends Context.Service<
       const toolkit = yield* AgentToolkit;
       const model = yield* OpenAiLanguageModel.model(config.ai.llmModel).captureRequirements;
 
+      let conversation: Conversation | null = null;
+
+      const liveConversation = (): Conversation | null => {
+        if (!conversation) return null;
+        const expired =
+          Date.now() - conversation.lastUsed >= config.chatTtlMs ||
+          conversation.exchanges >= MAX_CONVERSATION_EXCHANGES;
+        return expired ? null : conversation;
+      };
+
       const ask = Effect.fn("Agent.ask")(function* (question: string) {
-        const session = yield* Chat.fromPrompt([
-          { role: "system", content: systemPrompt(config.lang) },
-          { role: "user", content: [{ type: "text", text: question }] },
-        ]);
+        const kept = liveConversation() ?? {
+          session: yield* Chat.fromPrompt([{ role: "system", content: systemPrompt(config.lang) }]),
+          lastUsed: Date.now(),
+          exchanges: 0,
+        };
+        conversation = kept;
         const reports: string[] = [];
+        let prompt: Prompt.MessageEncoded[] = [{ role: "user", content: [{ type: "text", text: question }] }];
+        let speech = "";
         for (let turn = 0; turn < MAX_AGENT_TURNS; turn++) {
-          const response = yield* session.generateText({ prompt: [], toolkit });
+          const response = yield* kept.session.generateText({ prompt, toolkit });
+          prompt = [];
           for (const part of response.toolResults) {
             const result = part.result as Record<string, unknown>;
             const report = typeof result.report === "string" ? result.report : JSON.stringify(result);
             reports.push(`${part.name}: ${report}`);
           }
-          if (response.toolCalls.length === 0) return { speech: response.text, reports };
+          if (response.toolCalls.length === 0) {
+            speech = response.text;
+            break;
+          }
         }
-        return { speech: "", reports };
+        kept.lastUsed = Date.now();
+        kept.exchanges += 1;
+        return { speech, reports };
       }, Effect.provide(model));
+
+      const conversationAlive = () => Effect.sync(() => liveConversation() !== null);
+
+      const endConversation = () =>
+        Effect.sync(() => {
+          conversation = null;
+        });
 
       const compose = Effect.fn("Agent.compose")(function* (
         question: string,
@@ -183,7 +219,7 @@ export class Agent extends Context.Service<
         return { tree: null, error: lastError };
       }, Effect.provide(model));
 
-      return Agent.of({ ask, compose });
+      return Agent.of({ ask, conversationAlive, endConversation, compose });
     }),
   ).pipe(Layer.provide([AgentToolkitLayer, clientLayer]));
 }

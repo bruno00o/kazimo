@@ -31,6 +31,8 @@ export interface DaemonConfig extends KioskConfig {
   ai: AiConfig;
   agent: AgentConfig;
   wake: WakeConfig;
+  chatTtlMs: number;
+  followupWindowMs: number;
   port: number;
 }
 
@@ -98,5 +100,11 @@ export const daemonConfig: Config.Config<DaemonConfig> = Config.all({
     modelPath: optionalString("KAZIMO_WAKE_MODEL"),
     threshold: Config.withDefault(Config.number("KAZIMO_WAKE_THRESHOLD"), 0.5),
   }),
+  chatTtlMs: Config.withDefault(Config.number("KAZIMO_CHAT_TTL"), 180).pipe(
+    Config.map((seconds) => seconds * 1000),
+  ),
+  followupWindowMs: Config.withDefault(Config.number("KAZIMO_FOLLOWUP_WINDOW"), 8).pipe(
+    Config.map((seconds) => seconds * 1000),
+  ),
   port: Config.withDefault(Config.number("KAZIMO_PORT"), 8080),
 });

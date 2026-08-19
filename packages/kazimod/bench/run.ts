@@ -23,6 +23,7 @@ const runtime = ManagedRuntime.make(Agent.layer.pipe(Layer.provide(KioskBridge.l
 
 async function attempt(question: string): Promise<BenchEntry> {
   const started = Date.now();
+  await runtime.runPromise(Agent.use((agent) => agent.endConversation()));
   const reply = await runtime.runPromise(Agent.use((agent) => agent.ask(question)));
   const screen = await runtime.runPromise(
     Agent.use((agent) => agent.compose(question, reply.reports, reply.speech)),

@@ -7,6 +7,7 @@ const DEBOUNCE_FRAMES = 2;
 const PREROLL_FRAMES = 4;
 const SILENCE_CLOSE_MS = 800;
 const NO_SPEECH_ABORT_MS = 4000;
+const DEFAULT_FOLLOWUP_NO_SPEECH_ABORT_MS = 8000;
 const MAX_WINDOW_MS = 10_000;
 const REFRACTORY_FRAMES = 25;
 const BACKLOG_MAX_FRAMES = 25;
@@ -20,6 +21,7 @@ export interface Listener {
   push(frame: Uint8Array): void;
   forceStart(): void;
   forceEnd(): void;
+  openFollowup(): void;
   setSuppressed(suppressed: boolean): void;
 }
 
@@ -27,6 +29,7 @@ export function createListener(
   models: WakeModels,
   threshold: number,
   callbacks: ListenerCallbacks,
+  followupAbortMs = DEFAULT_FOLLOWUP_NO_SPEECH_ABORT_MS,
 ): Listener {
   const detector = models.createDetector();
   const vad = models.createVad();
@@ -38,8 +41,10 @@ export function createListener(
   const preroll: Uint8Array[] = [];
   let window: Uint8Array[] = [];
   let windowMs = 0;
+  let waitedMs = 0;
   let silenceMs = 0;
   let speechSeen = false;
+  let followup = false;
 
   let queue = Promise.resolve();
   let backlog = 0;
@@ -53,13 +58,19 @@ export function createListener(
     if (emit) callbacks.onUtterance(frames);
   };
 
-  const openWindow = () => {
+  const beginCapture = (frames: Uint8Array[]) => {
     mode = "capturing";
-    window = [...preroll];
-    windowMs = window.length * FRAME_MS;
+    window = frames;
+    windowMs = frames.length * FRAME_MS;
+    waitedMs = 0;
     silenceMs = 0;
     speechSeen = false;
     vad.reset();
+  };
+
+  const openWindow = () => {
+    followup = false;
+    beginCapture([...preroll]);
     callbacks.onWake();
   };
 
@@ -82,6 +93,7 @@ export function createListener(
   const capture = async (frame: Uint8Array, samples: Int16Array) => {
     window.push(frame);
     windowMs += FRAME_MS;
+    waitedMs += FRAME_MS;
     const [, probs] = await Promise.all([detector.feed(samples), vad.feed(samples)]);
     for (const prob of probs) {
       if (prob >= VAD_SPEECH_PROB) {
@@ -91,9 +103,14 @@ export function createListener(
         silenceMs += VAD_CHUNK_MS;
       }
     }
+    if (followup && !speechSeen) {
+      while (window.length > PREROLL_FRAMES) window.shift();
+      windowMs = window.length * FRAME_MS;
+    }
+    const noSpeechAborted = followup ? waitedMs >= followupAbortMs : windowMs >= NO_SPEECH_ABORT_MS;
     if (speechSeen && silenceMs >= SILENCE_CLOSE_MS) closeWindow(true);
     else if (windowMs >= MAX_WINDOW_MS) closeWindow(speechSeen);
-    else if (!speechSeen && windowMs >= NO_SPEECH_ABORT_MS) closeWindow(false);
+    else if (!speechSeen && noSpeechAborted) closeWindow(false);
   };
 
   const process = async (frame: Uint8Array) => {
@@ -137,6 +154,13 @@ export function createListener(
         consecutive = 0;
         refractory = PREROLL_FRAMES;
         callbacks.onUtterance(frames);
+      });
+    },
+    openFollowup() {
+      enqueue(() => {
+        if (mode !== "watching") return;
+        followup = true;
+        beginCapture([]);
       });
     },
     setSuppressed(value) {
