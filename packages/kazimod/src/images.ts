@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readdir, stat, unlink } from "node:fs/promises";
 import type { A2uiNode } from "@kazimo/shared";
 import sharp from "sharp";
+import type { ComposerNode } from "./a2ui";
 
 export const IMAGE_CACHE_DIR = `${process.env.HOME}/.kazimo/cache/images`;
 export const IMAGE_ROUTE_PREFIX = "/img/";
@@ -12,19 +13,7 @@ const MAX_DIMENSION = 1280;
 const WEBP_QUALITY = 82;
 const CACHE_MAX_FILES = 300;
 
-const IMAGE_URL_PATTERN = /https?:\/\/[^\s"'<>|)\]]+/g;
-
 export const ensureImageCacheDir = () => mkdir(IMAGE_CACHE_DIR, { recursive: true });
-
-export function imageUrlsIn(reports: string[]): Set<string> {
-  const urls = new Set<string>();
-  for (const report of reports) {
-    for (const match of report.matchAll(IMAGE_URL_PATTERN)) {
-      urls.add(match[0]);
-    }
-  }
-  return urls;
-}
 
 const fileFor = (url: string) => `${createHash("sha256").update(url).digest("hex").slice(0, 24)}.webp`;
 
@@ -72,19 +61,23 @@ export async function cacheImage(url: string): Promise<string | null> {
 }
 
 export type ImageResolver = (url: string) => Promise<string | null>;
+export type ImageFinder = (query: string) => Promise<string | null>;
 
-export async function resolveImages(
-  node: A2uiNode,
-  allowed: Set<string>,
-  resolve: ImageResolver,
+export async function resolveComposerTree(
+  node: ComposerNode,
+  find: ImageFinder,
+  cache: ImageResolver,
 ): Promise<A2uiNode | null> {
   if (node.kind === "image") {
-    if (!allowed.has(node.url)) return null;
-    const local = await resolve(node.url);
-    return local ? { ...node, url: local } : null;
+    const url = await find(node.query);
+    const local = url ? await cache(url) : null;
+    if (!local) return null;
+    return node.caption === undefined
+      ? { kind: "image", url: local }
+      : { kind: "image", url: local, caption: node.caption };
   }
   if (node.kind === "card" || node.kind === "row" || node.kind === "column") {
-    const children = await Promise.all(node.children.map((child) => resolveImages(child, allowed, resolve)));
+    const children = await Promise.all(node.children.map((child) => resolveComposerTree(child, find, cache)));
     const kept = children.filter((child): child is A2uiNode => child !== null);
     return kept.length ? { ...node, children: kept } : null;
   }

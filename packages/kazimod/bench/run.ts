@@ -1,8 +1,10 @@
 import { mkdir } from "node:fs/promises";
-import { Layer, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { Agent } from "../src/agent";
 import { KioskBridge } from "../src/bridge";
-import { cacheImage, ensureImageCacheDir, imageUrlsIn, resolveImages } from "../src/images";
+import { daemonConfig } from "../src/config";
+import { cacheImage, ensureImageCacheDir, resolveComposerTree } from "../src/images";
+import { imageSearchUrl } from "../src/tools";
 import questions from "./questions.json";
 
 const OUT_DIR = `${process.env.HOME}/.kazimo/bench`;
@@ -20,6 +22,7 @@ interface BenchEntry {
 }
 
 const runtime = ManagedRuntime.make(Agent.layer.pipe(Layer.provide(KioskBridge.layer)));
+const config = await Effect.runPromise(daemonConfig);
 
 async function attempt(question: string): Promise<BenchEntry> {
   const started = Date.now();
@@ -28,7 +31,9 @@ async function attempt(question: string): Promise<BenchEntry> {
   const screen = await runtime.runPromise(
     Agent.use((agent) => agent.compose(question, reply.reports, reply.speech)),
   );
-  const tree = screen.tree ? await resolveImages(screen.tree, imageUrlsIn(reply.reports), cacheImage) : null;
+  const tree = screen.tree
+    ? await resolveComposerTree(screen.tree, (query) => imageSearchUrl(config.agent, query), cacheImage)
+    : null;
   return {
     question,
     speech: reply.speech,

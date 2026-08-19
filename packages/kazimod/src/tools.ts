@@ -209,6 +209,23 @@ async function imageSearchReport(agent: AgentConfig, query: string): Promise<str
     .join(" | ");
 }
 
+export async function imageSearchUrl(agent: AgentConfig, query: string): Promise<string | null> {
+  if (!agent.searchKey) return null;
+  const res = await fetch(agent.searchUrl, {
+    method: "POST",
+    headers: { authorization: `Bearer ${agent.searchKey}`, "content-type": "application/json" },
+    body: JSON.stringify({ query, max_results: 1, include_images: true }),
+    signal: AbortSignal.timeout(IMAGE_SEARCH_TIMEOUT_MS),
+  });
+  if (!res.ok) return null;
+  const data = (await res.json()) as TavilyResponse;
+  for (const image of data.images ?? []) {
+    const url = typeof image === "string" ? image : image.url;
+    if (url) return url;
+  }
+  return null;
+}
+
 const reportOrFallback = (run: () => Promise<string>, fallback: string) =>
   Effect.promise(async () => {
     try {

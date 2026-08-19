@@ -17,11 +17,11 @@ import {
   cacheImage,
   ensureImageCacheDir,
   IMAGE_ROUTE_PREFIX,
-  imageUrlsIn,
-  resolveImages,
+  resolveComposerTree,
   serveCachedImage,
 } from "./images";
 import { createListener, type Listener } from "./listen";
+import { imageSearchUrl } from "./tools";
 import { defaultWakeModelPath, loadWakeModels, type WakeModels } from "./wake";
 
 export class ServerStartError extends Schema.TaggedError<ServerStartError>()("ServerStartError", {
@@ -138,7 +138,11 @@ function start(
             const outcome = screen.tree ? "tree" : (screen.error ?? "null");
             log(`composer (${Date.now() - composeStarted}ms): ${outcome}`);
             const tree = screen.tree
-              ? await resolveImages(screen.tree, imageUrlsIn(reply.reports), cacheImage)
+              ? await resolveComposerTree(
+                  screen.tree,
+                  (query) => imageSearchUrl(config.agent, query),
+                  cacheImage,
+                )
               : null;
             if (screen.tree && !tree) log("composer tree dropped: images unresolved");
             await journal({

@@ -1,9 +1,8 @@
 import { OpenAiClient, OpenAiLanguageModel } from "@effect/ai-openai-compat";
-import type { A2uiNode } from "@kazimo/shared";
 import { Context, Effect, Layer, Redacted } from "effect";
 import { type AiError, Chat, LanguageModel, type Prompt } from "effect/unstable/ai";
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable/http";
-import { decodeComposerReply } from "./a2ui";
+import { type ComposerNode, decodeComposerReply } from "./a2ui";
 import { daemonConfig } from "./config";
 import { AgentToolkit, AgentToolkitLayer } from "./tools";
 
@@ -79,7 +78,7 @@ const composerSystemPrompt = (lang: string) =>
   `{"kind":"title","text":string} | ` +
   `{"kind":"text","text":string} | ` +
   `{"kind":"number","value":string,"label"?:string} | ` +
-  `{"kind":"image","url":string,"caption"?:string} | ` +
+  `{"kind":"image","query":string,"caption"?:string} | ` +
   `{"kind":"icon","name":"sun"|"cloud"|"rain"|"snow"|"fog"|"storm"|"wind"|"moon"|"phone"|"message"|"calendar"|"music"} | ` +
   `{"kind":"list","items":string[]} | ` +
   `{"kind":"step","index":number,"text":string} | ` +
@@ -89,9 +88,11 @@ const composerSystemPrompt = (lang: string) =>
   `{"kind":"column","children":node[]}. ` +
   `The voice already speaks the answer: never repeat the spoken sentence. ` +
   `The screen carries what is hard to say aloud: a big number, a short list, steps, a date, a name, a picture. ` +
-  `Images: at most one, when the person asked to see something or a picture genuinely enriches the answer, ` +
-  `and its url must appear verbatim in the tool reports; never write a url from memory. ` +
-  `Icons: put one in each weather card to show the sky, and use them wherever a small symbol reads faster than a word. ` +
+  `Images: add one, at most, when a picture genuinely helps, for a person, a place, a monument, an animal or a plant the answer is about; ` +
+  `set query to a short search phrase for that picture, such as the person or place name, never a url. ` +
+  `Icons: the sky icons (sun, cloud, rain, snow, fog, storm, wind, moon) are only for weather, one in each weather card; ` +
+  `phone, message, calendar and music only for those exact subjects. ` +
+  `Never add an icon for decoration or mood: if none of these icons is literally the subject, use no icon. ` +
   `When there are two or three comparable facts, put each in its own small card inside a row rather than one big card. ` +
   `Use very few elements and keep every text short. ` +
   `Write all visible text in the language with BCP 47 code "${lang}". ` +
@@ -103,7 +104,7 @@ const composerRequest = (question: string, reports: string[], speech: string) =>
   `Spoken answer: ${speech}\n` +
   `Compose the screen now.`;
 
-const parseComposerReply = (text: string): A2uiNode | null => {
+const parseComposerReply = (text: string): ComposerNode | null => {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start === -1 || end <= start) throw new Error("no JSON object in reply");
@@ -124,7 +125,7 @@ interface Conversation {
 }
 
 export interface ComposedScreen {
-  tree: A2uiNode | null;
+  tree: ComposerNode | null;
   error: string | null;
 }
 
