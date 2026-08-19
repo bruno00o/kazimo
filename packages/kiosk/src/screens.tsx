@@ -102,6 +102,7 @@ export function IdleScreen({
   if (photo) {
     return (
       <div className="screen theme-dark">
+        <img className="photo-backdrop" src={photo.url} alt="" />
         <img className="photo-full" src={photo.url} alt="" />
         {photo.caption && (
           <>
