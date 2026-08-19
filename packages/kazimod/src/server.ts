@@ -7,6 +7,14 @@ import { speak, transcribe } from "./ai";
 import { wavFromPcm16 } from "./audio";
 import { KioskBridge, type KioskBridgeApi } from "./bridge";
 import { type DaemonConfig, daemonConfig } from "./config";
+import {
+  cacheImage,
+  ensureImageCacheDir,
+  IMAGE_ROUTE_PREFIX,
+  imageUrlsIn,
+  resolveImages,
+  serveCachedImage,
+} from "./images";
 import { createListener, type Listener } from "./listen";
 import { defaultWakeModelPath, loadWakeModels, type WakeModels } from "./wake";
 
@@ -78,16 +86,20 @@ function start(
       .then(async (screen) => {
         const outcome = screen.tree ? "tree" : (screen.error ?? "null");
         log(`composer (${Date.now() - composeStarted}ms): ${outcome}`);
+        const tree = screen.tree
+          ? await resolveImages(screen.tree, imageUrlsIn(reply.reports), cacheImage)
+          : null;
+        if (screen.tree && !tree) log("composer tree dropped: images unresolved");
         await journal({
           ts: new Date().toISOString(),
           question: text,
           reports: reply.reports,
           speech: reply.speech,
-          tree: screen.tree,
+          tree,
           error: screen.error,
         });
-        if (!screen.tree) return;
-        const message: DaemonToKiosk = { type: "assistant", tree: screen.tree };
+        if (!tree) return;
+        const message: DaemonToKiosk = { type: "assistant", tree };
         ws.send(JSON.stringify(message));
       })
       .catch((error) => log(`composer failed: ${error}`));
@@ -126,6 +138,10 @@ function start(
 
       if (p === "/ws" && srv.upgrade(req, { data: { id: Date.now(), capture: null, listener: null } }))
         return;
+
+      if (p.startsWith(IMAGE_ROUTE_PREFIX)) {
+        return (await serveCachedImage(p)) ?? new Response("not found", { status: 404 });
+      }
 
       if (p.endsWith("matrix_sdk_crypto_wasm_bg.wasm")) {
         return new Response(Bun.file(CRYPTO_WASM), {
@@ -216,6 +232,7 @@ export class KioskServer extends Context.Service<
       };
 
       yield* Effect.promise(() => mkdir(A2UI_LOG_DIR, { recursive: true }));
+      yield* Effect.promise(() => ensureImageCacheDir());
 
       const wakeModelPath = config.wake.modelPath ?? defaultWakeModelPath;
       const wakeModels = yield* Effect.tryPromise(() => loadWakeModels(wakeModelPath)).pipe(

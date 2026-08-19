@@ -1,4 +1,4 @@
-export type { A2uiNode } from "./a2ui";
+export { A2UI_ICONS, type A2uiIcon, type A2uiNode } from "./a2ui";
 export { type Tokens, tokens } from "./tokens";
 
 import type { A2uiNode } from "./a2ui";

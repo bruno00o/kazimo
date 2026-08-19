@@ -27,6 +27,7 @@ const ASSISTANT_FIXTURE: A2uiNode = {
         {
           kind: "card",
           children: [
+            { kind: "icon", name: "sun" },
             { kind: "number", value: "23", label: "today" },
             { kind: "text", text: "sunny all day" },
           ],
@@ -34,6 +35,7 @@ const ASSISTANT_FIXTURE: A2uiNode = {
         {
           kind: "card",
           children: [
+            { kind: "icon", name: "rain" },
             { kind: "number", value: "17", label: "tomorrow" },
             { kind: "text", text: "light rain" },
           ],

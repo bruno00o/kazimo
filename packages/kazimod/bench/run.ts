@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { Layer, ManagedRuntime } from "effect";
 import { Agent } from "../src/agent";
 import { KioskBridge } from "../src/bridge";
+import { cacheImage, ensureImageCacheDir, imageUrlsIn, resolveImages } from "../src/images";
 import questions from "./questions.json";
 
 const OUT_DIR = `${process.env.HOME}/.kazimo/bench`;
@@ -26,11 +27,12 @@ async function attempt(question: string): Promise<BenchEntry> {
   const screen = await runtime.runPromise(
     Agent.use((agent) => agent.compose(question, reply.reports, reply.speech)),
   );
+  const tree = screen.tree ? await resolveImages(screen.tree, imageUrlsIn(reply.reports), cacheImage) : null;
   return {
     question,
     speech: reply.speech,
     reports: reply.reports,
-    tree: screen.tree,
+    tree,
     error: screen.error,
     ms: Date.now() - started,
   };
@@ -44,6 +46,8 @@ const failed = (question: string, error: unknown, started: number): BenchEntry =
   error: String(error),
   ms: Date.now() - started,
 });
+
+await ensureImageCacheDir();
 
 const results: BenchEntry[] = [];
 

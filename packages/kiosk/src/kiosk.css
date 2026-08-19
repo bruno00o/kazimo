@@ -350,6 +350,23 @@
   color: var(--ink-soft);
 }
 
+.a2ui-icon {
+  display: flex;
+  justify-content: center;
+  color: var(--ink);
+}
+
+.a2ui-icon svg {
+  width: 9vh;
+  height: 9vh;
+}
+
+.a2ui-icon.a2ui-d2 svg,
+.a2ui-icon.a2ui-d3 svg {
+  width: 6.5vh;
+  height: 6.5vh;
+}
+
 .a2ui-list {
   list-style: none;
   margin: 0;

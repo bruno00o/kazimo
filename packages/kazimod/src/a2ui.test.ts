@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { A2uiNode } from "@kazimo/shared";
-import { decodeComposerReply, withoutImages } from "./a2ui";
+import { decodeComposerReply } from "./a2ui";
 
 describe("decodeComposerReply", () => {
   test("accepts a valid tree", () => {
@@ -29,19 +28,13 @@ describe("decodeComposerReply", () => {
   });
 });
 
-describe("withoutImages", () => {
-  test("removes image nodes and empty parents", () => {
-    const tree: A2uiNode = {
-      kind: "column",
-      children: [
-        { kind: "text", text: "kept" },
-        { kind: "card", children: [{ kind: "image", url: "https://example.com/a.jpg" }] },
-      ],
-    };
-    expect(withoutImages(tree)).toEqual({ kind: "column", children: [{ kind: "text", text: "kept" }] });
+describe("icon kind", () => {
+  test("accepts a known icon name", () => {
+    const reply = decodeComposerReply({ tree: { kind: "icon", name: "sun" } });
+    expect(reply.tree).toEqual({ kind: "icon", name: "sun" });
   });
 
-  test("returns null when only images remain", () => {
-    expect(withoutImages({ kind: "image", url: "https://example.com/a.jpg" })).toBeNull();
+  test("rejects an unknown icon name", () => {
+    expect(() => decodeComposerReply({ tree: { kind: "icon", name: "tornado" } })).toThrow();
   });
 });

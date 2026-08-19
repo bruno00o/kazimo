@@ -3,7 +3,7 @@ import type { A2uiNode } from "@kazimo/shared";
 import { Context, Effect, Layer, Redacted } from "effect";
 import { type AiError, Chat, LanguageModel, type Prompt } from "effect/unstable/ai";
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable/http";
-import { decodeComposerReply, withoutImages } from "./a2ui";
+import { decodeComposerReply } from "./a2ui";
 import { daemonConfig } from "./config";
 import { AgentToolkit, AgentToolkitLayer } from "./tools";
 
@@ -54,6 +54,8 @@ const systemPrompt = (lang: string) =>
   `Be brief and warm: one or two spoken sentences, no lists, no markup. ` +
   `Only state facts you are certain of or that come from a tool result; sharing stable general knowledge you are sure of is fine. ` +
   `For live information such as weather or news, always use your tools. ` +
+  `When the question is about something concrete you could show, a monument, an animal, a place, a plant, ` +
+  `also call ImageSearch so the screen can illustrate the answer. ` +
   `The configured feeds and location are the right ones for the person whatever their language: translate what matters from tool results into the answer language. ` +
   `If no tool covers the question, or a tool reports it is not configured or unreachable, say plainly that you cannot check that, and never improvise an answer from memory. ` +
   `When you answer from search results, state only what the results actually say; if they do not settle the question, say so. ` +
@@ -69,6 +71,8 @@ const composerSystemPrompt = (lang: string) =>
   `{"kind":"title","text":string} | ` +
   `{"kind":"text","text":string} | ` +
   `{"kind":"number","value":string,"label"?:string} | ` +
+  `{"kind":"image","url":string,"caption"?:string} | ` +
+  `{"kind":"icon","name":"sun"|"cloud"|"rain"|"snow"|"fog"|"storm"|"wind"|"moon"|"phone"|"message"|"calendar"|"music"} | ` +
   `{"kind":"list","items":string[]} | ` +
   `{"kind":"step","index":number,"text":string} | ` +
   `{"kind":"divider"} | ` +
@@ -76,7 +80,10 @@ const composerSystemPrompt = (lang: string) =>
   `{"kind":"row","children":node[]} | ` +
   `{"kind":"column","children":node[]}. ` +
   `The voice already speaks the answer: never repeat the spoken sentence. ` +
-  `The screen carries what is hard to say aloud: a big number, a short list, steps, a date, a name. ` +
+  `The screen carries what is hard to say aloud: a big number, a short list, steps, a date, a name, a picture. ` +
+  `Images: at most one, when the person asked to see something or a picture genuinely enriches the answer, ` +
+  `and its url must appear verbatim in the tool reports; never write a url from memory. ` +
+  `Icons: put one in each weather card to show the sky, and use them wherever a small symbol reads faster than a word. ` +
   `When there are two or three comparable facts, put each in its own small card inside a row rather than one big card. ` +
   `Use very few elements and keep every text short. ` +
   `Write all visible text in the language with BCP 47 code "${lang}". ` +
@@ -156,7 +163,7 @@ export class Agent extends Context.Service<
           const response = yield* languageModel.generateText({ prompt: messages });
           try {
             const tree = parseComposerReply(response.text);
-            return { tree: tree ? withoutImages(tree) : null, error: null };
+            return { tree, error: null };
           } catch (error) {
             lastError = String(error);
             messages.push(

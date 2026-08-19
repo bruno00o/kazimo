@@ -33,7 +33,7 @@ export async function transcribe(ai: AiConfig, wav: Uint8Array, language: string
   if (!ai.key) throw new Error("KAZIMO_AI_KEY not configured");
   const form = new FormData();
   form.append("model", ai.sttModel);
-  form.append("language", language);
+  form.append("language", language.split("-")[0] ?? language);
   form.append("file", new File([wav], "capture.wav", { type: "audio/wav" }));
   const res = await fetch(`${ai.baseUrl}/audio/transcriptions`, {
     method: "POST",

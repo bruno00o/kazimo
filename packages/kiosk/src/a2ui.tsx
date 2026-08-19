@@ -1,4 +1,33 @@
-import type { A2uiNode } from "@kazimo/shared";
+import type { A2uiIcon, A2uiNode } from "@kazimo/shared";
+import {
+  CalendarDays,
+  Cloud,
+  CloudFog,
+  CloudLightning,
+  CloudRain,
+  CloudSnow,
+  MessageSquare,
+  Moon,
+  Music,
+  Phone,
+  Sun,
+  Wind,
+} from "lucide-react";
+
+const ICONS: Record<A2uiIcon, typeof Sun> = {
+  sun: Sun,
+  cloud: Cloud,
+  rain: CloudRain,
+  snow: CloudSnow,
+  fog: CloudFog,
+  storm: CloudLightning,
+  wind: Wind,
+  moon: Moon,
+  phone: Phone,
+  message: MessageSquare,
+  calendar: CalendarDays,
+  music: Music,
+};
 
 const MAX_CONTAINER_DEPTH = 3;
 const MAX_ROW_CHILDREN = 2;
@@ -85,6 +114,14 @@ function NodeView({ node, depth }: { node: A2uiNode; depth: number }) {
           {node.caption && <figcaption>{node.caption}</figcaption>}
         </figure>
       );
+    case "icon": {
+      const Icon = ICONS[node.name];
+      return (
+        <div className={at("icon")}>
+          <Icon strokeWidth={2.25} />
+        </div>
+      );
+    }
     case "list":
       return (
         <ul className={at("list")}>

@@ -12,6 +12,7 @@
     "@effect/platform-bun": "4.0.0-rc.109",
     "@kazimo/shared": "workspace:*",
     "effect": "4.0.0-rc.109",
-    "onnxruntime-node": "1.28.0-dev.20260624-ba45260eed"
+    "onnxruntime-node": "1.28.0-dev.20260624-ba45260eed",
+    "sharp": "^0.35.3"
   }
 }

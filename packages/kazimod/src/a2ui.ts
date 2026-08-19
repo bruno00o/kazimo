@@ -1,4 +1,4 @@
-import type { A2uiNode } from "@kazimo/shared";
+import { A2UI_ICONS, type A2uiNode } from "@kazimo/shared";
 import { Schema } from "effect";
 
 const children = Schema.mutable(Schema.Array(Schema.suspend((): Schema.Codec<A2uiNode> => A2uiTree)));
@@ -16,6 +16,7 @@ export const A2uiTree = Schema.Union([
     url: Schema.String,
     caption: Schema.optionalKey(Schema.String),
   }),
+  Schema.Struct({ kind: Schema.Literal("icon"), name: Schema.Literals(A2UI_ICONS) }),
   Schema.Struct({ kind: Schema.Literal("list"), items: Schema.mutable(Schema.Array(Schema.String)) }),
   Schema.Struct({ kind: Schema.Literal("step"), index: Schema.Number, text: Schema.String }),
   Schema.Struct({ kind: Schema.Literal("divider") }),
@@ -32,13 +33,3 @@ export type A2uiContractHolds = _schemaFitsShared & _sharedFitsSchema;
 const ComposerReply = Schema.Struct({ tree: Schema.NullOr(A2uiTree) });
 
 export const decodeComposerReply = Schema.decodeUnknownSync(ComposerReply);
-
-export function withoutImages(node: A2uiNode): A2uiNode | null {
-  if (node.kind === "image") return null;
-  if (node.kind === "card" || node.kind === "row" || node.kind === "column") {
-    const kept = node.children.map(withoutImages).filter((child): child is A2uiNode => child !== null);
-    if (kept.length === 0) return null;
-    return { ...node, children: kept };
-  }
-  return node;
-}
