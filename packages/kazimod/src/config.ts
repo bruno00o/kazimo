@@ -23,6 +23,7 @@ export interface AgentConfig {
 export interface WakeConfig {
   modelPath: string | null;
   threshold: number;
+  captureRmsMin: number;
 }
 
 export interface DaemonConfig extends KioskConfig {
@@ -99,6 +100,7 @@ export const daemonConfig: Config.Config<DaemonConfig> = Config.all({
   wake: Config.all({
     modelPath: optionalString("KAZIMO_WAKE_MODEL"),
     threshold: Config.withDefault(Config.number("KAZIMO_WAKE_THRESHOLD"), 0.5),
+    captureRmsMin: Config.withDefault(Config.number("KAZIMO_CAPTURE_RMS_MIN"), 130),
   }),
   chatTtlMs: Config.withDefault(Config.number("KAZIMO_CHAT_TTL"), 180).pipe(
     Config.map((seconds) => seconds * 1000),

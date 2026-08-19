@@ -47,6 +47,16 @@ const log = (message: string) => console.log(`[kazimod] ${new Date().toISOString
 const ANNOUNCE_MAX_CHARS = 300;
 const WEATHER_REFRESH_MS = 20 * 60 * 1000;
 const MAX_FOLLOWUP_CHAIN = 3;
+const NOISY_DEBOUNCE_MS = 20_000;
+
+const NOISY_LINES: Record<string, string> = {
+  pt: "Está muito barulho, não consigo ouvir bem.",
+  fr: "Il y a trop de bruit, je n'entends pas bien.",
+  en: "It is too noisy, I cannot hear well.",
+};
+
+const noisyLine = (lang: string) =>
+  NOISY_LINES[lang.split("-")[0] ?? lang] ?? "It is too noisy, I cannot hear well.";
 
 function announcementText(lang: string, announcement: Announcement): string {
   const body = announcement.body ? announcement.body.slice(0, ANNOUNCE_MAX_CHARS) : null;
@@ -93,6 +103,7 @@ function start(
 ) {
   const isDev = process.env.NODE_ENV !== "production";
   let latestWeather: WeatherSummary | null = null;
+  let lastNoisy = 0;
   const {
     port: _port,
     ai: _ai,
@@ -174,6 +185,35 @@ function start(
     await composed;
   };
 
+  const announceNoisy = async (ws: Bun.ServerWebSocket<SocketData>) => {
+    ws.send(JSON.stringify({ type: "noisy" } as DaemonToKiosk));
+    if (!config.ai.key) return;
+    const audio = await speak(config.ai, noisyLine(config.lang), config.lang);
+    if (audio) ws.send(audio);
+  };
+
+  const handleUtterance = (
+    ws: Bun.ServerWebSocket<SocketData>,
+    frames: Uint8Array[],
+    level: number,
+    isFollowup: boolean,
+  ) => {
+    log(`capture level ${Math.round(level)}${isFollowup ? " (follow-up)" : ""}`);
+    if (level >= config.wake.captureRmsMin) {
+      void respond(ws, frames).catch((error) => log(`agent pipeline failed: ${error}`));
+      return;
+    }
+    if (isFollowup) {
+      log("follow-up dropped: below near-speech level");
+      return;
+    }
+    const now = Date.now();
+    if (now - lastNoisy < NOISY_DEBOUNCE_MS) return;
+    lastNoisy = now;
+    log("too noisy: wake capture below near-speech level");
+    void announceNoisy(ws).catch((error) => log(`noisy feedback failed: ${error}`));
+  };
+
   const server = Bun.serve<SocketData>({
     port: config.port,
     development: isDev && { hmr: true, console: true },
@@ -236,8 +276,8 @@ function start(
                 const wake: DaemonToKiosk = { type: "wake" };
                 ws.send(JSON.stringify(wake));
               },
-              onUtterance(frames) {
-                void respond(ws, frames).catch((error) => log(`agent pipeline failed: ${error}`));
+              onUtterance(frames, meta) {
+                handleUtterance(ws, frames, meta.level, meta.followup);
               },
               onScore(score, rms) {
                 log(`wake score ${score.toFixed(2)} rms ${Math.round(rms)}`);

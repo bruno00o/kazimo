@@ -15,6 +15,7 @@ import { playWake } from "./sounds";
 export interface AgentCallbacks {
   onAssistant: (tree: A2uiNode | null) => void;
   onWeather: (weather: WeatherSummary | null) => void;
+  onNoisy: () => void;
   onAnswerCall: () => void;
   onActivityClear: (what: "unread" | "missed") => void;
   onPlaceCall: (roomId: string) => void;
@@ -90,6 +91,7 @@ export function startAgent(callbacks: AgentCallbacks): AgentHandle {
       if (lastContacts) link.send({ type: "contacts", contacts: lastContacts });
     } else if (message.type === "assistant") callbacks.onAssistant(message.tree);
     else if (message.type === "weather") callbacks.onWeather(message.weather);
+    else if (message.type === "noisy") callbacks.onNoisy();
     else if (message.type === "wake") playWake();
     else if (message.type === "answer-call") callbacks.onAnswerCall();
     else if (message.type === "activity-clear") callbacks.onActivityClear(message.what);

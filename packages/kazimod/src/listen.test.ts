@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createListener } from "./listen";
+import { createListener, type UtteranceMeta } from "./listen";
 import type { WakeModels } from "./wake";
 
 const FRAME_BYTES = 1280 * 2;
@@ -197,6 +197,23 @@ describe("createListener", () => {
     }
     expect(utterances.length).toBe(1);
     expect(utterances[0]?.length).toBeLessThan(30);
+  });
+
+  test("utterance meta carries the follow-up flag and a finite speech level", async () => {
+    const metas: UtteranceMeta[] = [];
+    const listener = createListener(
+      stubModels({ scores: Array(40).fill(0), speechFrames: new Set([0, 1, 2]) }),
+      0.5,
+      { onWake: () => {}, onUtterance: (_frames, meta) => metas.push(meta) },
+    );
+    listener.openFollowup();
+    for (let i = 0; i < 30; i++) {
+      listener.push(frame(50));
+      await flush();
+    }
+    expect(metas.length).toBe(1);
+    expect(metas[0]?.followup).toBe(true);
+    expect(metas[0]?.level).toBeGreaterThan(0);
   });
 
   test("follow-up window does not open during push to talk", async () => {

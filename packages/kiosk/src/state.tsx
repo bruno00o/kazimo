@@ -1,7 +1,9 @@
 import type { KioskConfig, KioskState, WeatherSummary } from "@kazimo/shared";
-import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { type AgentHandle, startAgent } from "./agent";
 import { startKiosk } from "./matrix/controller";
+
+const NOISY_HINT_MS = 4000;
 
 const params = new URLSearchParams(location.search);
 const forcedState = params.get("state");
@@ -14,12 +16,14 @@ const StateCtx = createContext<{
   lang: string;
   night: boolean;
   weather: WeatherSummary | null;
+  noisy: boolean;
 }>({
   state: { kind: "idle", photo: null },
   setState: () => {},
   lang: "en",
   night: false,
   weather: null,
+  noisy: false,
 });
 
 export function KioskStateProvider({ children }: { children: ReactNode }) {
@@ -27,6 +31,14 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
   const [lang, setLang] = useState(forcedLang ?? "en");
   const [night, setNight] = useState(forcedNight);
   const [weather, setWeather] = useState<WeatherSummary | null>(null);
+  const [noisy, setNoisy] = useState(false);
+  const noisyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showNoisy = useCallback(() => {
+    setNoisy(true);
+    if (noisyTimer.current) clearTimeout(noisyTimer.current);
+    noisyTimer.current = setTimeout(() => setNoisy(false), NOISY_HINT_MS);
+  }, []);
 
   useEffect(() => {
     if (forcedState) {
@@ -39,6 +51,7 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
       const agent: AgentHandle = startAgent({
         onAssistant: (tree) => setState(tree ? { kind: "assistant", tree } : { kind: "idle", photo: null }),
         onWeather: setWeather,
+        onNoisy: showNoisy,
         onAnswerCall: () => {},
         onActivityClear: () => {},
         onPlaceCall: () => {},
@@ -64,6 +77,7 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
     agent = startAgent({
       onAssistant: handle.showAssistant,
       onWeather: setWeather,
+      onNoisy: showNoisy,
       onAnswerCall: handle.answerCall,
       onActivityClear: handle.clearActivity,
       onPlaceCall: handle.placeCall,
@@ -79,9 +93,11 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
       agent?.stop();
       handle.stop();
     };
-  }, []);
+  }, [showNoisy]);
 
-  return <StateCtx.Provider value={{ state, setState, lang, night, weather }}>{children}</StateCtx.Provider>;
+  return (
+    <StateCtx.Provider value={{ state, setState, lang, night, weather, noisy }}>{children}</StateCtx.Provider>
+  );
 }
 
 export const useKioskState = () => useContext(StateCtx);

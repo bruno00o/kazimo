@@ -496,6 +496,26 @@
   z-index: 2;
 }
 
+.noisy-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 9;
+  animation: layer-fade-in calc(var(--kz-fade-inMs) * 1ms) ease both;
+}
+
+.noisy-overlay svg {
+  width: 16vh;
+  height: 16vh;
+  padding: 4vh;
+  color: #ffffff;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: var(--kz-radius-round);
+}
+
 .night-veil {
   position: fixed;
   inset: 0;

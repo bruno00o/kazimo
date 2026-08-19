@@ -20,9 +20,14 @@ const frameRms = (samples: Int16Array) => {
   return Math.sqrt(energy / samples.length);
 };
 
+export interface UtteranceMeta {
+  level: number;
+  followup: boolean;
+}
+
 export interface ListenerCallbacks {
   onWake(): void;
-  onUtterance(frames: Uint8Array[]): void;
+  onUtterance(frames: Uint8Array[], meta: UtteranceMeta): void;
   onScore?(score: number, rms: number): void;
 }
 
@@ -54,6 +59,7 @@ export function createListener(
   let waitedMs = 0;
   let silenceMs = 0;
   let speechSeen = false;
+  let maxSpeechRms = 0;
   let followup = false;
 
   let queue = Promise.resolve();
@@ -61,11 +67,12 @@ export function createListener(
 
   const closeWindow = (emit: boolean) => {
     const frames = window;
+    const level = maxSpeechRms;
     window = [];
     mode = "watching";
     consecutive = 0;
     refractory = REFRACTORY_FRAMES;
-    if (emit) callbacks.onUtterance(frames);
+    if (emit) callbacks.onUtterance(frames, { level, followup });
   };
 
   const beginCapture = (frames: Uint8Array[]) => {
@@ -75,6 +82,7 @@ export function createListener(
     waitedMs = 0;
     silenceMs = 0;
     speechSeen = false;
+    maxSpeechRms = 0;
     vad.reset();
   };
 
@@ -109,14 +117,17 @@ export function createListener(
     windowMs += FRAME_MS;
     waitedMs += FRAME_MS;
     const [, probs] = await Promise.all([detector.feed(samples), vad.feed(samples)]);
+    let frameSpeech = false;
     for (const prob of probs) {
       if (prob >= VAD_SPEECH_PROB) {
         speechSeen = true;
+        frameSpeech = true;
         silenceMs = 0;
       } else {
         silenceMs += VAD_CHUNK_MS;
       }
     }
+    if (frameSpeech) maxSpeechRms = Math.max(maxSpeechRms, frameRms(samples));
     if (followup && !speechSeen) {
       while (window.length > PREROLL_FRAMES) window.shift();
       windowMs = window.length * FRAME_MS;
@@ -167,7 +178,7 @@ export function createListener(
         mode = "watching";
         consecutive = 0;
         refractory = PREROLL_FRAMES;
-        callbacks.onUtterance(frames);
+        callbacks.onUtterance(frames, { level: Number.POSITIVE_INFINITY, followup: false });
       });
     },
     openFollowup() {

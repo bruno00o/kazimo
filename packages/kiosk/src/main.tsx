@@ -1,5 +1,6 @@
 import type { A2uiNode, KioskState } from "@kazimo/shared";
 import { tokens } from "@kazimo/shared";
+import { EarOff } from "lucide-react";
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AssistantScreen, ScreenFor } from "./screens";
@@ -157,14 +158,23 @@ function GalleryScreen() {
   );
 }
 
+function NoisyOverlay() {
+  return (
+    <div className="noisy-overlay">
+      <EarOff strokeWidth={2} />
+    </div>
+  );
+}
+
 function App() {
-  const { state, night } = useKioskState();
+  const { state, night, noisy } = useKioskState();
   if (forced === "gallery") return <GalleryScreen />;
   const shown = forced ? (state.kind === "assistant" ? state : (FORCED[forced] ?? IDLE)) : state;
   const veiled = night && shown.kind === "idle";
   return (
     <>
       <FadeStack state={shown} />
+      {noisy && <NoisyOverlay />}
       <div className={veiled ? "night-veil veiled" : "night-veil"} />
     </>
   );
