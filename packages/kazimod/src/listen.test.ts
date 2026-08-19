@@ -72,6 +72,37 @@ describe("createListener", () => {
     expect(wakes.length).toBe(0);
   });
 
+  test("an energy dip between debounce frames does not block the wake", async () => {
+    const wakes: number[] = [];
+    const listener = createListener(
+      stubModels({ scores: [0, 0, 0.9, 0.9], speechFrames: new Set([0, 1, 2]) }),
+      0.5,
+      { onWake: () => wakes.push(1), onUtterance: () => {} },
+    );
+    listener.push(frame(10));
+    listener.push(frame(10));
+    listener.push(new Uint8Array(FRAME_BYTES));
+    listener.push(new Uint8Array(FRAME_BYTES));
+    await flush();
+    expect(wakes.length).toBe(1);
+  });
+
+  test("reports scores above the floor while watching", async () => {
+    const reports: Array<[number, number]> = [];
+    const listener = createListener(stubModels({ scores: [0.1, 0.3, 0.1], speechFrames: new Set() }), 0.5, {
+      onWake: () => {},
+      onUtterance: () => {},
+      onScore: (score, rms) => reports.push([score, rms]),
+    });
+    for (let i = 0; i < 3; i++) {
+      listener.push(frame(10));
+      await flush();
+    }
+    expect(reports.length).toBe(1);
+    expect(reports[0]?.[0]).toBe(0.3);
+    expect(reports[0]?.[1]).toBeGreaterThan(0);
+  });
+
   test("a single frame above threshold does not wake", async () => {
     const scores = [0, 0.9, 0, 0, 0.9, 0];
     const { wakes } = await run({ scores, speechFrames: new Set() }, 20);

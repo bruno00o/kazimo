@@ -12,6 +12,7 @@ const MAX_WINDOW_MS = 10_000;
 const REFRACTORY_FRAMES = 25;
 const BACKLOG_MAX_FRAMES = 25;
 const MIN_WAKE_RMS = 100;
+const SCORE_REPORT_FLOOR = 0.2;
 
 const frameRms = (samples: Int16Array) => {
   let energy = 0;
@@ -22,6 +23,7 @@ const frameRms = (samples: Int16Array) => {
 export interface ListenerCallbacks {
   onWake(): void;
   onUtterance(frames: Uint8Array[]): void;
+  onScore?(score: number, rms: number): void;
 }
 
 export interface Listener {
@@ -46,6 +48,7 @@ export function createListener(
   let consecutive = 0;
   let refractory = 0;
   const preroll: Uint8Array[] = [];
+  const recentRms: number[] = [];
   let window: Uint8Array[] = [];
   let windowMs = 0;
   let waitedMs = 0;
@@ -84,6 +87,8 @@ export function createListener(
   const watch = async (frame: Uint8Array, samples: Int16Array) => {
     preroll.push(frame);
     if (preroll.length > PREROLL_FRAMES) preroll.shift();
+    recentRms.push(frameRms(samples));
+    if (recentRms.length > PREROLL_FRAMES) recentRms.shift();
     const score = await detector.feed(samples);
     if (refractory > 0) {
       refractory -= 1;
@@ -93,7 +98,9 @@ export function createListener(
       consecutive = 0;
       return;
     }
-    consecutive = score >= threshold && frameRms(samples) >= MIN_WAKE_RMS ? consecutive + 1 : 0;
+    const heard = Math.max(...recentRms) >= MIN_WAKE_RMS;
+    if (score >= SCORE_REPORT_FLOOR) callbacks.onScore?.(score, recentRms[recentRms.length - 1] ?? 0);
+    consecutive = score >= threshold && heard ? consecutive + 1 : 0;
     if (consecutive >= DEBOUNCE_FRAMES) openWindow();
   };
 

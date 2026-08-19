@@ -225,6 +225,9 @@ function start(
               onUtterance(frames) {
                 void respond(ws, frames).catch((error) => log(`agent pipeline failed: ${error}`));
               },
+              onScore(score, rms) {
+                log(`wake score ${score.toFixed(2)} rms ${Math.round(rms)}`);
+              },
             },
             config.followupWindowMs,
           );
