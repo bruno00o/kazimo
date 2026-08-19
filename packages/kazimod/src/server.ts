@@ -46,6 +46,7 @@ const log = (message: string) => console.log(`[kazimod] ${new Date().toISOString
 
 const ANNOUNCE_MAX_CHARS = 300;
 const WEATHER_REFRESH_MS = 20 * 60 * 1000;
+const MAX_FOLLOWUP_CHAIN = 3;
 
 function announcementText(lang: string, announcement: Announcement): string {
   const body = announcement.body ? announcement.body.slice(0, ANNOUNCE_MAX_CHARS) : null;
@@ -74,6 +75,7 @@ interface SocketData {
   capture: Uint8Array[] | null;
   listener: Listener | null;
   suppressFollowup: boolean;
+  followupChain: number;
 }
 
 interface AgentBridge {
@@ -196,7 +198,7 @@ function start(
       if (
         p === "/ws" &&
         srv.upgrade(req, {
-          data: { id: Date.now(), capture: null, listener: null, suppressFollowup: false },
+          data: { id: Date.now(), capture: null, listener: null, suppressFollowup: false, followupChain: 0 },
         })
       )
         return;
@@ -230,6 +232,7 @@ function start(
             {
               onWake() {
                 log("wake word detected");
+                ws.data.followupChain = 0;
                 const wake: DaemonToKiosk = { type: "wake" };
                 ws.send(JSON.stringify(wake));
               },
@@ -287,8 +290,13 @@ function start(
           ws.data.suppressFollowup = false;
           if (settled) log("follow-up skipped: exchange settled");
           else if (ws.data.listener && agent.conversationAlive()) {
-            log("follow-up window open");
-            ws.data.listener.openFollowup();
+            if (ws.data.followupChain >= MAX_FOLLOWUP_CHAIN) {
+              log(`follow-up chain limit reached (${MAX_FOLLOWUP_CHAIN}); wake word required`);
+            } else {
+              ws.data.followupChain += 1;
+              log(`follow-up window open (${ws.data.followupChain}/${MAX_FOLLOWUP_CHAIN})`);
+              ws.data.listener.openFollowup();
+            }
           }
         } else if (msg.type === "capture-start") {
           if (ws.data.listener) ws.data.listener.forceStart();
