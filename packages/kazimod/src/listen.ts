@@ -11,6 +11,13 @@ const DEFAULT_FOLLOWUP_NO_SPEECH_ABORT_MS = 8000;
 const MAX_WINDOW_MS = 10_000;
 const REFRACTORY_FRAMES = 25;
 const BACKLOG_MAX_FRAMES = 25;
+const MIN_WAKE_RMS = 100;
+
+const frameRms = (samples: Int16Array) => {
+  let energy = 0;
+  for (const sample of samples) energy += sample * sample;
+  return Math.sqrt(energy / samples.length);
+};
 
 export interface ListenerCallbacks {
   onWake(): void;
@@ -86,7 +93,7 @@ export function createListener(
       consecutive = 0;
       return;
     }
-    consecutive = score >= threshold ? consecutive + 1 : 0;
+    consecutive = score >= threshold && frameRms(samples) >= MIN_WAKE_RMS ? consecutive + 1 : 0;
     if (consecutive >= DEBOUNCE_FRAMES) openWindow();
   };
 

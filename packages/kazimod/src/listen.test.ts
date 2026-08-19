@@ -58,6 +58,20 @@ describe("createListener", () => {
     expect(utterances[0]?.length).toBeGreaterThanOrEqual(4);
   });
 
+  test("near-silent frames never wake regardless of score", async () => {
+    const wakes: number[] = [];
+    const listener = createListener(
+      stubModels({ scores: Array(20).fill(0.9), speechFrames: new Set() }),
+      0.5,
+      { onWake: () => wakes.push(1), onUtterance: () => {} },
+    );
+    for (let i = 0; i < 10; i++) {
+      listener.push(new Uint8Array(FRAME_BYTES));
+      await flush();
+    }
+    expect(wakes.length).toBe(0);
+  });
+
   test("a single frame above threshold does not wake", async () => {
     const scores = [0, 0.9, 0, 0, 0.9, 0];
     const { wakes } = await run({ scores, speechFrames: new Set() }, 20);
