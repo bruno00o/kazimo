@@ -354,6 +354,16 @@ const ShowPhotos = Tool.make("ShowPhotos", {
   success: ScreenReport,
 });
 
+const EndChat = Tool.make("EndChat", {
+  description:
+    "Close the conversation when the person signals they are finished, for example stop, that is all, no thank you, enough, or goodbye. After this the device rests and listens again only when called by name.",
+  success: Schema.Struct({
+    report: Schema.String,
+    done: Schema.optionalKey(Schema.Boolean),
+    end: Schema.optionalKey(Schema.Boolean),
+  }),
+});
+
 export const AgentToolkit = Toolkit.make(
   CurrentTime,
   Weather,
@@ -368,6 +378,7 @@ export const AgentToolkit = Toolkit.make(
   SendMessage,
   ReadMessagesFrom,
   ShowPhotos,
+  EndChat,
 );
 
 const timeOf = (timestamp: number) =>
@@ -545,6 +556,7 @@ export const AgentToolkitLayer = AgentToolkit.toLayer(
           const sentAt = reply.result.timestamp ? `, sent at ${timeOf(reply.result.timestamp)},` : "";
           return { report: `The latest photo${sender}${sentAt} is now on the screen.`, screen: true };
         }),
+      EndChat: () => Effect.succeed({ report: "Closing the conversation.", done: true, end: true }),
     });
   }),
 );

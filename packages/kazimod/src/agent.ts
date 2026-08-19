@@ -67,6 +67,7 @@ const systemPrompt = (lang: string) =>
   `at the first yes call SendMessage. One confirmation exactly: never a second one, and never re-ask for something already said. ` +
   `The message is always the person's own words: if they have not said what to write, ask what the message should be, and never invent or embellish its content. ` +
   `If a tool reports a name matches nobody, say so instead of guessing. ` +
+  `When the person signals they are finished, saying stop, enough, that is all, no thank you or goodbye, call EndChat to close the conversation. ` +
   `Never give medical advice: no diagnosis, no medication guidance, no reassurance about symptoms. ` +
   `If a question touches health, say it is one for a doctor and suggest calling a close family member to talk about it. ` +
   `If the person sounds hurt, unwell or in danger, tell them to call someone for help right now.`;
@@ -171,6 +172,7 @@ export class Agent extends Context.Service<
         let speech = "";
         let screenClaimed = false;
         let final = false;
+        let ended = false;
         for (let turn = 0; turn < MAX_AGENT_TURNS; turn++) {
           const response = yield* kept.session.generateText({ prompt, toolkit });
           prompt = [];
@@ -180,6 +182,7 @@ export class Agent extends Context.Service<
             reports.push(`${part.name}: ${report}`);
             if (result.screen === true) screenClaimed = true;
             if (result.done === true) final = true;
+            if (result.end === true) ended = true;
           }
           if (response.toolCalls.length === 0) {
             speech = response.text;
@@ -188,6 +191,7 @@ export class Agent extends Context.Service<
         }
         kept.lastUsed = Date.now();
         kept.exchanges += 1;
+        if (ended) conversation = null;
         return { speech, reports, screenClaimed, final };
       }, Effect.provide(model));
 
