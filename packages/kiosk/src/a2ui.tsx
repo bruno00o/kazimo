@@ -13,6 +13,7 @@ import {
   Sun,
   Wind,
 } from "lucide-react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 const ICONS: Record<A2uiIcon, typeof Sun> = {
   sun: Sun,
@@ -153,11 +154,27 @@ function NodeView({ node, depth }: { node: A2uiNode; depth: number }) {
 }
 
 export function A2uiView({ tree }: { tree: A2uiNode }) {
-  const pruned = pruneTree(tree);
-  if (!pruned) return null;
+  const depthPruned = useMemo(() => pruneDepth(tree, 0), [tree]);
+  const [budget, setBudget] = useState(MAX_LEAVES);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const shownTree = useRef(tree);
+
+  if (shownTree.current !== tree) {
+    shownTree.current = tree;
+    setBudget(MAX_LEAVES);
+  }
+
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (root && root.scrollHeight > root.clientHeight + 1 && budget > 1) setBudget(budget - 1);
+  });
+
+  if (!depthPruned) return null;
+  const fitted = capLeaves(depthPruned, { left: budget });
+  if (!fitted) return null;
   return (
-    <div className="a2ui-root">
-      <NodeView node={pruned} depth={0} />
+    <div className="a2ui-root" ref={rootRef}>
+      <NodeView node={fitted} depth={0} />
     </div>
   );
 }
