@@ -1,4 +1,11 @@
-import type { ActivitySummary, Contact, HistoryMessage, UnreadItem } from "@kazimo/shared";
+import type {
+  A2uiIcon,
+  ActivitySummary,
+  Contact,
+  HistoryMessage,
+  UnreadItem,
+  WeatherSummary,
+} from "@kazimo/shared";
 import { Effect, Schema } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
 import { KioskBridge } from "./bridge";
@@ -111,6 +118,33 @@ async function weatherReport(agent: AgentConfig, lang: string, place?: string): 
     dayLine("Today", data.daily, 0),
     dayLine("Tomorrow", data.daily, 1),
   ].join(" ");
+}
+
+const weatherIcon = (code: number): A2uiIcon => {
+  if (code <= 1) return "sun";
+  if (code <= 3) return "cloud";
+  if (code <= 48) return "fog";
+  if (code >= 71 && code <= 77) return "snow";
+  if (code === 85 || code === 86) return "snow";
+  if (code >= 95) return "storm";
+  return "rain";
+};
+
+export async function currentWeather(agent: AgentConfig): Promise<WeatherSummary | null> {
+  if (agent.latitude === null || agent.longitude === null) return null;
+  const url = new URL("https://api.open-meteo.com/v1/forecast");
+  url.searchParams.set("latitude", String(agent.latitude));
+  url.searchParams.set("longitude", String(agent.longitude));
+  url.searchParams.set("current", "temperature_2m,weather_code");
+  url.searchParams.set("timezone", "auto");
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { current: { temperature_2m: number; weather_code: number } };
+    return { tempC: Math.round(data.current.temperature_2m), icon: weatherIcon(data.current.weather_code) };
+  } catch {
+    return null;
+  }
 }
 
 const XML_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };

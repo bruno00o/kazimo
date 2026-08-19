@@ -1,8 +1,8 @@
-import type { A2uiNode, ActivitySummary, KioskState, Person, PhotoRef } from "@kazimo/shared";
+import type { A2uiNode, ActivitySummary, KioskState, Person, PhotoRef, WeatherSummary } from "@kazimo/shared";
 import { tokens } from "@kazimo/shared";
 import { MessageSquare, Phone } from "lucide-react";
 import { useEffect, useState } from "react";
-import { A2uiView } from "./a2ui";
+import { A2uiView, ICONS } from "./a2ui";
 import { type BadgeGroup, badgeFor } from "./activity";
 import { stringsFor } from "./i18n";
 import { useKioskState } from "./state";
@@ -15,21 +15,56 @@ function Aurora({ periodMs, color }: { periodMs: number; color?: string }) {
   return <div className="aurora" style={style} />;
 }
 
-function Clock({ locale }: { locale: string }) {
+function useNow() {
   const [now, setNow] = useState(() => new Date());
-
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 10_000);
     return () => clearInterval(timer);
   }, []);
+  return now;
+}
 
+const timeLabel = (now: Date, locale: string) =>
+  now.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+
+function Clock({ locale }: { locale: string }) {
+  const now = useNow();
   return (
     <>
-      <div className="clock">{now.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}</div>
+      <div className="clock">{timeLabel(now, locale)}</div>
       <div className="date">
         {now.toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "long" })}
       </div>
     </>
+  );
+}
+
+function AmbientPills({
+  locale,
+  weather,
+  showTime,
+}: {
+  locale: string;
+  weather: WeatherSummary | null;
+  showTime: boolean;
+}) {
+  const now = useNow();
+  if (!weather && !showTime) return null;
+  const WeatherIcon = weather ? ICONS[weather.icon] : null;
+  return (
+    <div className="ambient-pills">
+      {showTime && (
+        <div className="activity-pill">
+          <span>{timeLabel(now, locale)}</span>
+        </div>
+      )}
+      {weather && WeatherIcon && (
+        <div className="activity-pill">
+          <WeatherIcon strokeWidth={2.25} />
+          <span>{weather.tempC}°</span>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -92,12 +127,14 @@ export function IdleScreen({
   activity,
   badgeHint,
   badgeOthers,
+  weather,
 }: {
   photo: PhotoRef | null;
   locale: string;
   activity?: ActivitySummary;
   badgeHint: string;
   badgeOthers: string;
+  weather: WeatherSummary | null;
 }) {
   if (photo) {
     return (
@@ -111,6 +148,7 @@ export function IdleScreen({
           </>
         )}
         <ActivityBadges activity={activity} hint={badgeHint} others={badgeOthers} />
+        <AmbientPills locale={locale} weather={weather} showTime />
       </div>
     );
   }
@@ -119,6 +157,7 @@ export function IdleScreen({
       <Aurora periodMs={tokens.breath.idleMs} />
       <Clock locale={locale} />
       <ActivityBadges activity={activity} hint={badgeHint} others={badgeOthers} />
+      <AmbientPills locale={locale} weather={weather} showTime={false} />
     </div>
   );
 }
@@ -186,7 +225,7 @@ export function DegradedScreen({
 }
 
 export function ScreenFor({ state }: { state: KioskState }) {
-  const { lang } = useKioskState();
+  const { lang, weather } = useKioskState();
   const strings = stringsFor(lang);
 
   switch (state.kind) {
@@ -198,6 +237,7 @@ export function ScreenFor({ state }: { state: KioskState }) {
           activity={state.activity}
           badgeHint={strings.badgeHint}
           badgeOthers={strings.badgeOthers}
+          weather={weather}
         />
       );
     case "incoming-call":
@@ -223,6 +263,7 @@ export function ScreenFor({ state }: { state: KioskState }) {
           locale={strings.locale}
           badgeHint={strings.badgeHint}
           badgeOthers={strings.badgeOthers}
+          weather={weather}
         />
       );
   }

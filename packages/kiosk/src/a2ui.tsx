@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
-const ICONS: Record<A2uiIcon, typeof Sun> = {
+export const ICONS: Record<A2uiIcon, typeof Sun> = {
   sun: Sun,
   cloud: Cloud,
   rain: CloudRain,

@@ -5,6 +5,7 @@ import {
   CAPTURE_SAMPLE_RATE,
   type DaemonToKiosk,
   type KioskToDaemon,
+  type WeatherSummary,
 } from "@kazimo/shared";
 import { Context, Effect, Layer, Schema } from "effect";
 import kioskPage from "../../kiosk/index.html";
@@ -21,7 +22,7 @@ import {
   serveCachedImage,
 } from "./images";
 import { createListener, type Listener } from "./listen";
-import { imageSearchUrl } from "./tools";
+import { currentWeather, imageSearchUrl } from "./tools";
 import { defaultWakeModelPath, loadWakeModels, type WakeModels } from "./wake";
 
 export class ServerStartError extends Schema.TaggedError<ServerStartError>()("ServerStartError", {
@@ -44,6 +45,7 @@ const BENCH_RESULTS_PATH = `${process.env.HOME}/.kazimo/bench/latest.json`;
 const log = (message: string) => console.log(`[kazimod] ${new Date().toISOString()} ${message}`);
 
 const ANNOUNCE_MAX_CHARS = 300;
+const WEATHER_REFRESH_MS = 20 * 60 * 1000;
 
 function announcementText(lang: string, announcement: Announcement): string {
   const body = announcement.body ? announcement.body.slice(0, ANNOUNCE_MAX_CHARS) : null;
@@ -88,6 +90,7 @@ function start(
   bridge: KioskBridgeApi,
 ) {
   const isDev = process.env.NODE_ENV !== "production";
+  let latestWeather: WeatherSummary | null = null;
   const {
     port: _port,
     ai: _ai,
@@ -169,7 +172,7 @@ function start(
     await composed;
   };
 
-  return Bun.serve<SocketData>({
+  const server = Bun.serve<SocketData>({
     port: config.port,
     development: isDev && { hmr: true, console: true },
 
@@ -242,6 +245,9 @@ function start(
         }
         const hello: DaemonToKiosk = { type: "config", config: kioskConfig };
         ws.send(JSON.stringify(hello));
+        ws.subscribe("weather");
+        if (latestWeather)
+          ws.send(JSON.stringify({ type: "weather", weather: latestWeather } as DaemonToKiosk));
       },
       message(ws, raw) {
         if (typeof raw !== "string") {
@@ -302,6 +308,17 @@ function start(
       },
     },
   });
+
+  const refreshWeather = async () => {
+    const weather = await currentWeather(config.agent);
+    if (!weather) return;
+    latestWeather = weather;
+    server.publish("weather", JSON.stringify({ type: "weather", weather } as DaemonToKiosk));
+  };
+  void refreshWeather();
+  setInterval(() => void refreshWeather(), WEATHER_REFRESH_MS);
+
+  return server;
 }
 
 export class KioskServer extends Context.Service<

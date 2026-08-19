@@ -1,7 +1,7 @@
 export { A2UI_ICONS, type A2uiIcon, type A2uiNode } from "./a2ui";
 export { type Tokens, tokens } from "./tokens";
 
-import type { A2uiNode } from "./a2ui";
+import type { A2uiIcon, A2uiNode } from "./a2ui";
 
 export type KioskState =
   | { kind: "idle"; photo: PhotoRef | null; activity?: ActivitySummary }
@@ -70,12 +70,18 @@ export interface Announcement {
   body: string | null;
 }
 
+export interface WeatherSummary {
+  tempC: number;
+  icon: A2uiIcon;
+}
+
 export const CAPTURE_SAMPLE_RATE = 16000;
 
 export type DaemonToKiosk =
   | { type: "state"; state: KioskState }
   | { type: "config"; config: KioskConfig }
   | { type: "assistant"; tree: A2uiNode | null }
+  | { type: "weather"; weather: WeatherSummary | null }
   | { type: "wake" }
   | { type: "answer-call" }
   | { type: "activity-clear"; what: "unread" | "missed" }

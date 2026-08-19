@@ -1,4 +1,4 @@
-import type { KioskConfig, KioskState } from "@kazimo/shared";
+import type { KioskConfig, KioskState, WeatherSummary } from "@kazimo/shared";
 import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
 import { type AgentHandle, startAgent } from "./agent";
 import { startKiosk } from "./matrix/controller";
@@ -13,12 +13,20 @@ const StateCtx = createContext<{
   setState: (s: KioskState) => void;
   lang: string;
   night: boolean;
-}>({ state: { kind: "idle", photo: null }, setState: () => {}, lang: "en", night: false });
+  weather: WeatherSummary | null;
+}>({
+  state: { kind: "idle", photo: null },
+  setState: () => {},
+  lang: "en",
+  night: false,
+  weather: null,
+});
 
 export function KioskStateProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<KioskState>({ kind: "idle", photo: null });
   const [lang, setLang] = useState(forcedLang ?? "en");
   const [night, setNight] = useState(forcedNight);
+  const [weather, setWeather] = useState<WeatherSummary | null>(null);
 
   useEffect(() => {
     if (forcedState) {
@@ -30,6 +38,7 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
       }
       const agent: AgentHandle = startAgent({
         onAssistant: (tree) => setState(tree ? { kind: "assistant", tree } : { kind: "idle", photo: null }),
+        onWeather: setWeather,
         onAnswerCall: () => {},
         onActivityClear: () => {},
         onPlaceCall: () => {},
@@ -54,6 +63,7 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
     });
     agent = startAgent({
       onAssistant: handle.showAssistant,
+      onWeather: setWeather,
       onAnswerCall: handle.answerCall,
       onActivityClear: handle.clearActivity,
       onPlaceCall: handle.placeCall,
@@ -71,7 +81,7 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  return <StateCtx.Provider value={{ state, setState, lang, night }}>{children}</StateCtx.Provider>;
+  return <StateCtx.Provider value={{ state, setState, lang, night, weather }}>{children}</StateCtx.Provider>;
 }
 
 export const useKioskState = () => useContext(StateCtx);
