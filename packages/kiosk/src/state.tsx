@@ -29,7 +29,7 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
           .catch(() => {});
       }
       const agent: AgentHandle = startAgent({
-        onAssistant: (tree) => setState({ kind: "assistant", tree }),
+        onAssistant: (tree) => setState(tree ? { kind: "assistant", tree } : { kind: "idle", photo: null }),
         onAnswerCall: () => {},
         onActivityClear: () => {},
         onPlaceCall: () => {},

@@ -12,7 +12,7 @@ import { type MicCapture, startMicCapture } from "./mic";
 import { playWake } from "./sounds";
 
 export interface AgentCallbacks {
-  onAssistant: (tree: A2uiNode) => void;
+  onAssistant: (tree: A2uiNode | null) => void;
   onAnswerCall: () => void;
   onActivityClear: (what: "unread" | "missed") => void;
   onPlaceCall: (roomId: string) => void;

@@ -75,7 +75,7 @@ export const CAPTURE_SAMPLE_RATE = 16000;
 export type DaemonToKiosk =
   | { type: "state"; state: KioskState }
   | { type: "config"; config: KioskConfig }
-  | { type: "assistant"; tree: A2uiNode }
+  | { type: "assistant"; tree: A2uiNode | null }
   | { type: "wake" }
   | { type: "answer-call" }
   | { type: "activity-clear"; what: "unread" | "missed" }

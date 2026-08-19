@@ -1,5 +1,6 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import {
+  type A2uiNode,
   type Announcement,
   CAPTURE_SAMPLE_RATE,
   type DaemonToKiosk,
@@ -116,6 +117,11 @@ function start(
     log(`agent (${Date.now() - askStarted}ms): ${reply.speech}`);
     if (!reply.speech.trim()) return;
 
+    const sendTree = (tree: A2uiNode | null) => {
+      const message: DaemonToKiosk = { type: "assistant", tree };
+      ws.send(JSON.stringify(message));
+    };
+
     const composeStarted = Date.now();
     const composed = reply.screenClaimed
       ? journal({
@@ -125,7 +131,7 @@ function start(
           speech: reply.speech,
           tree: null,
           claimed: true,
-        })
+        }).then(() => sendTree(null))
       : agent
           .compose(text, reply.reports, reply.speech)
           .then(async (screen) => {
@@ -143,9 +149,7 @@ function start(
               tree,
               error: screen.error,
             });
-            if (!tree) return;
-            const message: DaemonToKiosk = { type: "assistant", tree };
-            ws.send(JSON.stringify(message));
+            sendTree(tree);
           })
           .catch((error) => log(`composer failed: ${error}`));
 

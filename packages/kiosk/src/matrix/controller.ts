@@ -61,7 +61,7 @@ export interface KioskCallbacks {
 
 export interface KioskHandle {
   stop: () => void;
-  showAssistant: (tree: A2uiNode) => void;
+  showAssistant: (tree: A2uiNode | null) => void;
   answerCall: () => void;
   clearActivity: (what: "unread" | "missed") => void;
   placeCall: (roomId: string) => void;
@@ -89,7 +89,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
   let stopped = false;
   let client: MatrixClient | null = null;
   let callHost: CallHost | null = null;
-  let assistantSink: ((tree: A2uiNode) => void) | null = null;
+  let assistantSink: ((tree: A2uiNode | null) => void) | null = null;
   let answerSink: (() => void) | null = null;
   let clearSink: ((what: "unread" | "missed") => void) | null = null;
   let placeCallSink: ((roomId: string) => void) | null = null;
@@ -217,7 +217,12 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
     };
 
     assistantSink = (tree) => {
-      if (stopped || !INTERRUPTIBLE_MODES.has(mode)) return;
+      if (stopped) return;
+      if (!tree) {
+        if (mode === "assistant") showIdle();
+        return;
+      }
+      if (!INTERRUPTIBLE_MODES.has(mode)) return;
       show({ kind: "assistant", tree });
       scheduleIdleReturn();
     };
