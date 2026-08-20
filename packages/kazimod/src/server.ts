@@ -122,6 +122,15 @@ function start(
     log(`capture: ${seconds.toFixed(1)}s (${pcm.byteLength} bytes)`);
     if (!config.ai.key) return;
 
+    ws.send(JSON.stringify({ type: "thinking", on: true } as DaemonToKiosk));
+    try {
+      await pipeline(ws, wav);
+    } finally {
+      ws.send(JSON.stringify({ type: "thinking", on: false } as DaemonToKiosk));
+    }
+  };
+
+  const pipeline = async (ws: Bun.ServerWebSocket<SocketData>, wav: Uint8Array) => {
     const sttStarted = Date.now();
     const text = await transcribe(config.ai, wav, config.lang);
     log(`transcription (${Date.now() - sttStarted}ms): ${text}`);

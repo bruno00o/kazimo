@@ -10,7 +10,7 @@ import type {
 } from "@kazimo/shared";
 import { connectDaemon } from "./link";
 import { type MicCapture, startMicCapture } from "./mic";
-import { playWake } from "./sounds";
+import { playWake, startThinking, stopThinking } from "./sounds";
 
 export interface AgentCallbacks {
   onAssistant: (tree: A2uiNode | null) => void;
@@ -57,6 +57,7 @@ export function startAgent(callbacks: AgentCallbacks): AgentHandle {
   };
 
   const play = (audio: ArrayBuffer) => {
+    stopThinking();
     if (voice) {
       voice.element.pause();
       URL.revokeObjectURL(voice.url);
@@ -93,6 +94,7 @@ export function startAgent(callbacks: AgentCallbacks): AgentHandle {
     else if (message.type === "weather") callbacks.onWeather(message.weather);
     else if (message.type === "noisy") callbacks.onNoisy();
     else if (message.type === "wake") playWake();
+    else if (message.type === "thinking") (message.on ? startThinking : stopThinking)();
     else if (message.type === "answer-call") callbacks.onAnswerCall();
     else if (message.type === "activity-clear") callbacks.onActivityClear(message.what);
     else if (message.type === "place-call") callbacks.onPlaceCall(message.roomId);
@@ -116,6 +118,7 @@ export function startAgent(callbacks: AgentCallbacks): AgentHandle {
 
   return {
     stop() {
+      stopThinking();
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       void session?.then((capture) => capture?.stop());

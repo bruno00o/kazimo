@@ -1,3 +1,5 @@
+const C4 = 261.63;
+const E4 = 329.63;
 const G4 = 392;
 const C5 = 523.25;
 const D5 = 587.33;
@@ -5,6 +7,7 @@ const E5 = 659.25;
 const G5 = 783.99;
 
 const RING_INTERVAL_MS = 2600;
+const THINK_INTERVAL_MS = 1300;
 const HARMONICS: ReadonlyArray<readonly [number, number]> = [
   [1, 1],
   [2, 0.18],
@@ -13,6 +16,7 @@ const HARMONICS: ReadonlyArray<readonly [number, number]> = [
 
 let context: AudioContext | null = null;
 let ringTimer: ReturnType<typeof setInterval> | null = null;
+let thinkTimer: ReturnType<typeof setInterval> | null = null;
 
 const audio = (): AudioContext => {
   context ??= new AudioContext();
@@ -72,4 +76,21 @@ export const playMessage = () => {
 export const playWake = () => {
   tone(E5, 0, 0.3, 0.07);
   tone(G5, 0.1, 0.4, 0.07);
+};
+
+const thinkMotif = () => {
+  tone(C4, 0, 0.55, 0.035);
+  tone(E4, 0.28, 0.6, 0.028);
+};
+
+export const startThinking = () => {
+  if (thinkTimer) return;
+  thinkMotif();
+  thinkTimer = setInterval(thinkMotif, THINK_INTERVAL_MS);
+};
+
+export const stopThinking = () => {
+  if (!thinkTimer) return;
+  clearInterval(thinkTimer);
+  thinkTimer = null;
 };

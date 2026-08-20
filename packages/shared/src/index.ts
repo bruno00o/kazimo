@@ -83,6 +83,7 @@ export type DaemonToKiosk =
   | { type: "assistant"; tree: A2uiNode | null }
   | { type: "weather"; weather: WeatherSummary | null }
   | { type: "wake" }
+  | { type: "thinking"; on: boolean }
   | { type: "noisy" }
   | { type: "answer-call" }
   | { type: "activity-clear"; what: "unread" | "missed" }
