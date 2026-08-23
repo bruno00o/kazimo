@@ -23,9 +23,6 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": [
-      "@livekit/react-native-expo-plugin",
-      "@config-plugins/react-native-webrtc"
-    ]
+    "plugins": ["@livekit/react-native-expo-plugin", "@config-plugins/react-native-webrtc"]
   }
 }

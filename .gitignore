@@ -6,6 +6,8 @@ repos/
 *.md
 !README.md
 .env
+.env.local
+.env*.local
 node_modules/
 dist/
 .DS_Store

@@ -17,7 +17,9 @@
     "expo-status-bar": "~57.0.1",
     "matrix-js-sdk": "42.1.0",
     "react": "19.2.3",
-    "react-native": "0.86.2"
+    "react-native": "0.86.2",
+    "react-native-get-random-values": "~1.11.0",
+    "react-native-url-polyfill": "^4.0.0"
   },
   "devDependencies": {
     "@config-plugins/react-native-webrtc": "^15.0.2",
