@@ -1,9 +1,9 @@
 import { tokens } from "@kazimo/shared";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
+import type { ClientLike } from "@unomed/react-native-matrix-sdk";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { type MatrixClient, type MatrixEvent, type RoomMember, RoomMemberEvent } from "matrix-js-sdk";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -20,25 +20,17 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Icon } from "../../src/Icon";
 import { appStrings } from "../../src/i18n";
 import {
-  authenticatedImageSource,
   blurhashOf,
   CHAT_THUMBNAIL_EDGE,
-  FULL_SCREEN_EDGE,
   fitWithin,
+  type MediaRef,
+  photoUri,
   pickPhoto,
   preparePhoto,
-  sendPhoto,
 } from "../../src/media";
-import { conversationOf } from "../../src/session";
+import { type Conversation, conversationFor } from "../../src/session";
 import { useSession } from "../../src/session-context";
-import {
-  type ChatItem,
-  openTimeline,
-  sendText,
-  setTyping,
-  type TimelineSource,
-  typingNames,
-} from "../../src/timeline";
+import { type ChatItem, openTimeline, type TimelineSource } from "../../src/timeline";
 
 const t = appStrings();
 
@@ -52,8 +44,9 @@ const MAX_BUBBLE_HEIGHT = 340;
 const PHOTO_TRANSITION_MS = 200;
 const VIEWER_CLOSE_SIZE = 36;
 const VIEWER_CLOSE_INSET = 8;
+const FULL_SIZE = null;
 
-type ViewedPhoto = { mxc: string; label: string };
+type ViewedPhoto = MediaRef & { label: string };
 
 const timeOf = (timestamp: number) =>
   new Date(timestamp).toLocaleTimeString(t.locale, { hour: "2-digit", minute: "2-digit" });
@@ -66,19 +59,32 @@ const typingLabelOf = (names: readonly string[]): string | null => {
   return names.length === 1 ? `${names[0]} ${t.typingOne}` : `${names.length} ${t.typingMany}`;
 };
 
+const usePhotoUri = (client: ClientLike, ref: MediaRef, edge: number | null): string | null => {
+  const [uri, setUri] = useState<string | null>(null);
+  const { mxc, json } = ref;
+  useEffect(() => {
+    let cancelled = false;
+    void photoUri(client, { mxc, json }, edge)
+      .then((value) => {
+        if (!cancelled) setUri(value);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [client, mxc, json, edge]);
+  return uri;
+};
+
 export default function ChatScreen() {
   const { roomId } = useLocalSearchParams<{ roomId: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { client, identity } = useSession();
-  const room = roomId ? client.getRoom(roomId) : null;
-  const conversation = useMemo(
-    () => (room ? conversationOf(room, identity.userId) : null),
-    [room, identity.userId],
-  );
 
   const source = useRef<TimelineSource | null>(null);
   const list = useRef<FlashListRef<ChatItem> | null>(null);
+  const [conversation, setConversation] = useState<Conversation | null>(null);
   const [items, setItems] = useState<ChatItem[] | null>(null);
   const [draft, setDraft] = useState("");
   const [hasOlder, setHasOlder] = useState(true);
@@ -86,7 +92,6 @@ export default function ChatScreen() {
   const [viewed, setViewed] = useState<ViewedPhoto | null>(null);
   const [uploading, setUploading] = useState(false);
   const loadingOlder = useRef(false);
-  const acknowledged = useRef<string | null>(null);
   const typingSentAt = useRef(NEVER_TYPED);
   const onScreen = useRef(true);
 
@@ -98,9 +103,21 @@ export default function ChatScreen() {
   );
 
   useEffect(() => {
-    if (!room) return;
+    if (!roomId) return;
     let cancelled = false;
-    void openTimeline(client, room).then((opened) => {
+    void conversationFor(client, roomId).then((found) => {
+      if (!cancelled) setConversation(found);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, roomId]);
+
+  useEffect(() => {
+    if (!roomId) return;
+    let cancelled = false;
+    void openTimeline(client, roomId, identity.userId).then((opened) => {
+      if (!opened) return;
       if (cancelled) {
         opened.stop();
         return;
@@ -108,47 +125,28 @@ export default function ChatScreen() {
       source.current = opened;
       setItems(opened.items());
       opened.subscribe(() => setItems(opened.items()));
+      opened.subscribeTyping(setTypists);
     });
     return () => {
       cancelled = true;
       source.current?.stop();
       source.current = null;
     };
-  }, [client, room]);
-
-  useEffect(() => {
-    if (!room) return;
-    const refresh = () => setTypists(typingNames(room.getMembers(), identity.userId));
-    const onTyping = (_event: MatrixEvent, member: RoomMember) => {
-      if (member.roomId !== room.roomId) return;
-      refresh();
-    };
-    refresh();
-    client.on(RoomMemberEvent.Typing, onTyping);
-    return () => {
-      client.off(RoomMemberEvent.Typing, onTyping);
-    };
-  }, [client, room, identity.userId]);
+  }, [client, roomId, identity.userId]);
 
   useEffect(() => {
     if (items === null) return;
-    const event = source.current?.lastEvent() ?? null;
-    const eventId = event?.getId();
-    if (!event || !eventId) return;
-    if (event.getSender() === identity.userId) return;
-    if (acknowledged.current === eventId) return;
     const timer = setTimeout(() => {
-      acknowledged.current = eventId;
-      void client.sendReadReceipt(event).catch(() => {});
+      void source.current?.markLatestRead().catch(() => {});
     }, READ_RECEIPT_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [client, items, identity.userId]);
+  }, [items]);
 
   useEffect(
     () => () => {
-      if (roomId && typingSentAt.current !== NEVER_TYPED) void setTyping(client, roomId, false);
+      if (typingSentAt.current !== NEVER_TYPED) void source.current?.setTyping(false).catch(() => {});
     },
-    [client, roomId],
+    [],
   );
 
   const loadOlder = useCallback(async () => {
@@ -163,15 +161,14 @@ export default function ChatScreen() {
   }, [hasOlder]);
 
   const stopTyping = useCallback(() => {
-    if (!roomId || typingSentAt.current === NEVER_TYPED) return;
+    if (typingSentAt.current === NEVER_TYPED) return;
     typingSentAt.current = NEVER_TYPED;
-    void setTyping(client, roomId, false);
-  }, [client, roomId]);
+    void source.current?.setTyping(false).catch(() => {});
+  }, []);
 
   const edit = useCallback(
     (text: string) => {
       setDraft(text);
-      if (!roomId) return;
       if (!text.trim()) {
         stopTyping();
         return;
@@ -179,41 +176,43 @@ export default function ChatScreen() {
       const now = Date.now();
       if (now - typingSentAt.current < TYPING_THROTTLE_MS) return;
       typingSentAt.current = now;
-      void setTyping(client, roomId, true);
+      void source.current?.setTyping(true).catch(() => {});
     },
-    [client, roomId, stopTyping],
+    [stopTyping],
   );
 
   const submit = useCallback(() => {
     const body = draft.trim();
-    if (!body || !roomId) return;
+    if (!body) return;
     setDraft("");
     stopTyping();
-    void sendText(client, roomId, body).catch(() => {});
-  }, [client, draft, roomId, stopTyping]);
+    void source.current?.send(body).catch(() => {});
+  }, [draft, stopTyping]);
 
   const attach = useCallback(async () => {
-    if (!roomId) return;
+    const current = source.current;
+    if (!current) return;
     try {
       const picked = await pickPhoto();
       if (!picked) return;
       setUploading(true);
       const prepared = await preparePhoto(picked.uri);
       const blurhash = await blurhashOf(prepared.uri);
-      await sendPhoto(client, roomId, { ...prepared, blurhash });
+      await current.sendPhoto({ ...prepared, blurhash });
     } catch {
       Alert.alert(t.photoSendFailed);
     } finally {
       if (onScreen.current) setUploading(false);
     }
-  }, [client, roomId]);
+  }, []);
 
   const openPhoto = useCallback((photo: ViewedPhoto) => setViewed(photo), []);
   const closePhoto = useCallback(() => setViewed(null), []);
+  const resolveSource = useCallback((mxc: string) => source.current?.mediaSourceOf(mxc) ?? null, []);
 
   const typingLabel = typingLabelOf(typists);
 
-  if (!roomId || !room || !conversation) return null;
+  if (!roomId || !conversation) return null;
 
   return (
     <KeyboardAvoidingView
@@ -271,6 +270,7 @@ export default function ChatScreen() {
               item={item}
               showSender={conversation.kind === "group"}
               client={client}
+              resolveSource={resolveSource}
               onOpenPhoto={openPhoto}
             />
           )}
@@ -331,16 +331,7 @@ export default function ChatScreen() {
       >
         <View style={styles.viewer}>
           <Pressable style={styles.viewerCanvas} onPress={closePhoto}>
-            {viewed !== null && (
-              <Image
-                source={authenticatedImageSource(client, viewed.mxc, FULL_SCREEN_EDGE, FULL_SCREEN_EDGE)}
-                style={styles.viewerImage}
-                contentFit="contain"
-                cachePolicy="memory-disk"
-                transition={PHOTO_TRANSITION_MS}
-                accessibilityLabel={viewed.label}
-              />
-            )}
+            {viewed !== null && <FullPhoto client={client} photo={viewed} />}
           </Pressable>
           <Pressable
             accessibilityRole="button"
@@ -356,15 +347,64 @@ export default function ChatScreen() {
   );
 }
 
+function FullPhoto({ client, photo }: { client: ClientLike; photo: ViewedPhoto }) {
+  const uri = usePhotoUri(client, photo, FULL_SIZE);
+  return (
+    <Image
+      source={uri === null ? undefined : { uri }}
+      style={styles.viewerImage}
+      contentFit="contain"
+      cachePolicy="memory-disk"
+      transition={PHOTO_TRANSITION_MS}
+      accessibilityLabel={photo.label}
+    />
+  );
+}
+
+function PhotoBubble({
+  client,
+  item,
+  media,
+  onOpenPhoto,
+}: {
+  client: ClientLike;
+  item: Extract<ChatItem, { kind: "image" }>;
+  media: MediaRef;
+  onOpenPhoto: (photo: ViewedPhoto) => void;
+}) {
+  const uri = usePhotoUri(client, media, CHAT_THUMBNAIL_EDGE);
+  const label = item.caption ?? t.photo;
+  return (
+    <Pressable
+      accessibilityRole="imagebutton"
+      accessibilityLabel={label}
+      onPress={() => onOpenPhoto({ ...media, label })}
+    >
+      <Image
+        source={uri === null ? undefined : { uri }}
+        style={fitWithin(item.width, item.height, MAX_BUBBLE_WIDTH, MAX_BUBBLE_HEIGHT)}
+        placeholder={item.blurhash === null ? undefined : { blurhash: item.blurhash }}
+        cachePolicy="memory-disk"
+        contentFit="cover"
+        transition={PHOTO_TRANSITION_MS}
+        recyclingKey={item.id}
+        accessibilityLabel={label}
+      />
+    </Pressable>
+  );
+}
+
 function Row({
   item,
   showSender,
   client,
+  resolveSource,
   onOpenPhoto,
 }: {
   item: ChatItem;
   showSender: boolean;
-  client: MatrixClient;
+  client: ClientLike;
+  resolveSource: (mxc: string) => string | null;
   onOpenPhoto: (photo: ViewedPhoto) => void;
 }) {
   if (item.kind === "dayMarker") {
@@ -389,22 +429,12 @@ function Row({
         {item.kind === "text" ? (
           <Text style={[styles.bodyText, mine && styles.bodyTextMine]}>{item.body}</Text>
         ) : (
-          <Pressable
-            accessibilityRole="imagebutton"
-            accessibilityLabel={item.caption ?? t.photo}
-            onPress={() => onOpenPhoto({ mxc: item.mxc, label: item.caption ?? t.photo })}
-          >
-            <Image
-              source={authenticatedImageSource(client, item.mxc, CHAT_THUMBNAIL_EDGE, CHAT_THUMBNAIL_EDGE)}
-              style={fitWithin(item.width, item.height, MAX_BUBBLE_WIDTH, MAX_BUBBLE_HEIGHT)}
-              placeholder={item.blurhash === null ? undefined : { blurhash: item.blurhash }}
-              cachePolicy="memory-disk"
-              contentFit="cover"
-              transition={PHOTO_TRANSITION_MS}
-              recyclingKey={item.id}
-              accessibilityLabel={item.caption ?? t.photo}
-            />
-          </Pressable>
+          <PhotoBubble
+            client={client}
+            item={item}
+            media={{ mxc: item.mxc, json: resolveSource(item.mxc) }}
+            onOpenPhoto={onOpenPhoto}
+          />
         )}
         {item.kind === "image" && item.caption !== null && (
           <Text style={[styles.bodyText, mine && styles.bodyTextMine, styles.photoInset]}>

@@ -1,15 +1,5 @@
-import {
-  ClientEvent,
-  createClient,
-  type MatrixClient,
-  type MatrixEvent,
-  NotificationCountType,
-  PushRuleActionName,
-  type Room,
-  SyncState,
-  type TokenRefreshFunction,
-} from "matrix-js-sdk";
-import { createSqliteStore, databaseNameForUser } from "./store";
+import type { ClientLike, EventTimelineItem, RoomInfo, RoomLike } from "@unomed/react-native-matrix-sdk";
+import type { MatrixHandle } from "./matrix";
 
 export type Identity = {
   userId: string;
@@ -28,9 +18,16 @@ export type Conversation = {
   encrypted: boolean;
 };
 
-const GROUP_THRESHOLD = 3;
-const INITIAL_SYNC_LIMIT = 20;
-const PUSH_RULE_SCOPE = "global";
+type Sdk = typeof import("@unomed/react-native-matrix-sdk");
+
+const GROUP_THRESHOLD = 3n;
+
+let pendingSdk: Promise<Sdk> | null = null;
+
+const sdk = (): Promise<Sdk> => {
+  pendingSdk ??= import("@unomed/react-native-matrix-sdk");
+  return pendingSdk;
+};
 
 export const whoami = async (homeserver: string, token: string): Promise<Identity> => {
   const res = await fetch(`${homeserver}/_matrix/client/v3/account/whoami`, {
@@ -41,108 +38,82 @@ export const whoami = async (homeserver: string, token: string): Promise<Identit
   return { userId: body.user_id, deviceId: body.device_id ?? "" };
 };
 
-export type SessionRefresh = {
-  refreshToken: string;
-  tokenRefreshFunction: TokenRefreshFunction;
+export const acceptInvites = async (client: ClientLike): Promise<void> => {
+  const { Membership } = await sdk();
+  const invited = client.rooms().filter((room) => room.membership() === Membership.Invited);
+  await Promise.all(invited.map((room) => client.joinRoomById(room.id()).catch(() => undefined)));
 };
 
-export const startSession = async (
-  homeserver: string,
-  token: string,
-  identity: Identity,
-  refresh?: SessionRefresh,
-): Promise<MatrixClient> => {
-  const store = createSqliteStore({ dbName: databaseNameForUser(identity.userId) });
-  const client = createClient({
-    baseUrl: homeserver,
-    accessToken: token,
-    userId: identity.userId,
-    deviceId: identity.deviceId || undefined,
-    useAuthorizationHeader: true,
-    store,
-    refreshToken: refresh?.refreshToken,
-    tokenRefreshFunction: refresh?.tokenRefreshFunction,
-  });
-  await store.startup();
-  await client.startClient({ initialSyncLimit: INITIAL_SYNC_LIMIT });
-  await new Promise<void>((resolve, reject) => {
-    const onSync = (state: SyncState) => {
-      if (state === SyncState.Prepared) {
-        client.off(ClientEvent.Sync, onSync);
-        resolve();
-      } else if (state === SyncState.Error) {
-        client.off(ClientEvent.Sync, onSync);
-        reject(new Error("sync error"));
-      }
-    };
-    client.on(ClientEvent.Sync, onSync);
-  });
-  await acceptInvites(client);
-  return client;
+export const endSession = (handle: MatrixHandle): Promise<void> => handle.stop();
+
+const previewOf = (module: Sdk, item: EventTimelineItem | undefined): Conversation["preview"] => {
+  const content = item?.content;
+  if (!content || content.tag !== module.TimelineItemContent_Tags.MsgLike) return null;
+  const kind = content.inner.content.kind;
+  if (kind.tag !== module.MsgLikeKind_Tags.Message) return null;
+  const message = kind.inner.content;
+  if (message.msgType.tag === module.MessageType_Tags.Image) return { kind: "photo" };
+  return { kind: "text", body: message.body };
 };
 
-const acceptInvites = async (client: MatrixClient): Promise<void> => {
-  const invited = client.getRooms().filter((room) => room.getMyMembership() === "invite");
-  await Promise.all(invited.map((room) => client.joinRoom(room.roomId).catch(() => undefined)));
-};
-
-const previewOf = (event: MatrixEvent | undefined): Conversation["preview"] => {
-  if (event?.getType() !== "m.room.message" || event.isRedacted()) return null;
-  const content = event.getContent();
-  if (content.msgtype === "m.image") return { kind: "photo" };
-  if (typeof content.body === "string") return { kind: "text", body: content.body };
-  return null;
-};
-
-const lastMessage = (room: Room): MatrixEvent | undefined =>
-  [...room.getLiveTimeline().getEvents()].reverse().find((event) => event.getType() === "m.room.message");
-
-const isMuted = (room: Room): boolean => {
-  if (!room.client.pushRules) return false;
-  const rule = room.client.getRoomPushRule(PUSH_RULE_SCOPE, room.roomId);
-  return rule?.actions.includes(PushRuleActionName.DontNotify) ?? false;
-};
-
-export const setRoomMuted = async (client: MatrixClient, roomId: string, muted: boolean): Promise<void> => {
-  await client.setRoomMutePushRule(PUSH_RULE_SCOPE, roomId, muted);
-};
-
-export const markRead = async (client: MatrixClient, roomId: string): Promise<void> => {
-  const room = client.getRoom(roomId);
-  const event = room ? lastMessage(room) : undefined;
-  if (!event || event.status !== null) return;
-  await client.sendReadReceipt(event);
-};
-
-export const conversationOf = (room: Room, myUserId: string): Conversation => {
-  const members = room.getJoinedMembers();
-  const others = members.filter((member) => member.userId !== myUserId);
-  const isPerson = members.length < GROUP_THRESHOLD && others.length === 1;
+const conversationOf = (
+  module: Sdk,
+  info: RoomInfo,
+  latest: EventTimelineItem | undefined,
+  me: string,
+): Conversation => {
+  const others = info.heroes.filter((hero) => hero.userId !== me);
+  const isPerson = info.activeMembersCount < GROUP_THRESHOLD;
   const other = isPerson ? others[0] : undefined;
   return {
-    id: room.roomId,
-    name: other?.name ?? room.name,
+    id: info.id,
+    name: other?.displayName ?? info.displayName ?? info.id,
     kind: isPerson ? "person" : "group",
     otherUserId: other?.userId ?? null,
-    preview: previewOf(lastMessage(room)),
-    lastActive: room.getLastActiveTimestamp(),
-    unread: room.getUnreadNotificationCount(NotificationCountType.Total),
-    muted: isMuted(room),
-    encrypted: room.hasEncryptionStateEvent(),
+    preview: previewOf(module, latest),
+    lastActive: latest ? Number(latest.timestamp) : 0,
+    unread: Number(info.numUnreadNotifications),
+    muted: info.cachedUserDefinedNotificationMode === module.RoomNotificationMode.Mute,
+    encrypted: info.encryptionState === module.EncryptionState.Encrypted,
   };
 };
 
-export const conversations = (client: MatrixClient): Conversation[] => {
-  const me = client.getUserId() ?? "";
-  return client
-    .getRooms()
-    .filter((room) => room.getMyMembership() === "join")
-    .map((room) => conversationOf(room, me))
-    .sort((a, b) => b.lastActive - a.lastActive);
+const describe = async (module: Sdk, room: RoomLike, me: string): Promise<Conversation> => {
+  const [info, latest] = await Promise.all([room.roomInfo(), room.latestEvent().catch(() => undefined)]);
+  return conversationOf(module, info, latest, me);
 };
 
-export const endSession = async (client: MatrixClient): Promise<void> => {
-  client.stopClient();
-  await client.store.deleteAllData();
-  await client.store.destroy();
+export const conversations = async (client: ClientLike): Promise<Conversation[]> => {
+  const module = await sdk();
+  const me = client.userId();
+  const joined = client.rooms().filter((room) => room.membership() === module.Membership.Joined);
+  const list = await Promise.all(joined.map((room) => describe(module, room, me)));
+  return list.sort((a, b) => b.lastActive - a.lastActive);
+};
+
+export const conversationFor = async (client: ClientLike, roomId: string): Promise<Conversation | null> => {
+  const room = client.getRoom(roomId);
+  if (!room) return null;
+  return describe(await sdk(), room, client.userId());
+};
+
+export const markRead = async (client: ClientLike, roomId: string): Promise<void> => {
+  const room = client.getRoom(roomId);
+  if (!room) return;
+  const { ReceiptType } = await sdk();
+  await room.markAsRead(ReceiptType.Read);
+};
+
+export const setRoomMuted = async (client: ClientLike, roomId: string, muted: boolean): Promise<void> => {
+  const settings = await client.getNotificationSettings();
+  if (!muted) {
+    await settings.restoreDefaultRoomNotificationMode(roomId);
+    return;
+  }
+  const { RoomNotificationMode } = await sdk();
+  await settings.setRoomNotificationMode(roomId, RoomNotificationMode.Mute);
+};
+
+export const leaveConversation = async (client: ClientLike, roomId: string): Promise<void> => {
+  await client.getRoom(roomId)?.leave();
 };

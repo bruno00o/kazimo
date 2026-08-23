@@ -1,19 +1,19 @@
 import { tokens } from "@kazimo/shared";
 import { FlashList } from "@shopify/flash-list";
 import * as Haptics from "expo-haptics";
-import { useRouter } from "expo-router";
-import { ClientEvent, RoomEvent } from "matrix-js-sdk";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ContextMenu, hasNativeContextMenu, type MenuAction, openActionsAlert } from "../src/ContextMenu";
 import { Icon } from "../src/Icon";
 import { appStrings } from "../src/i18n";
-import { type Conversation, conversations, markRead, setRoomMuted } from "../src/session";
+import { type Conversation, conversations, leaveConversation, markRead, setRoomMuted } from "../src/session";
 import { useSession } from "../src/session-context";
 
 const t = appStrings();
 
+const REFRESH_INTERVAL_MS = 4000;
 const MUTED_ICON_SIZE = 14;
 const MARK_READ_ACTION = "markRead";
 const MUTE_ACTION = "mute";
@@ -46,9 +46,13 @@ export default function Home() {
   const { client } = useSession();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [list, setList] = useState<Conversation[]>(() => conversations(client));
+  const [list, setList] = useState<Conversation[]>([]);
 
-  const refreshList = useCallback(() => setList(conversations(client)), [client]);
+  const refreshList = useCallback(() => {
+    void conversations(client)
+      .then(setList)
+      .catch(() => {});
+  }, [client]);
 
   const confirmLeave = useCallback(
     (conversation: Conversation) => {
@@ -58,7 +62,7 @@ export default function Home() {
           text: t.leave,
           style: "destructive",
           onPress: () => {
-            void client.leave(conversation.id).then(refreshList);
+            void leaveConversation(client, conversation.id).then(refreshList);
           },
         },
       ]);
@@ -100,18 +104,12 @@ export default function Home() {
   );
 
   useEffect(() => {
-    const refresh = () => setList(conversations(client));
-    client.on(ClientEvent.Sync, refresh);
-    client.on(RoomEvent.Timeline, refresh);
-    client.on(RoomEvent.Name, refresh);
-    client.on(RoomEvent.Receipt, refresh);
-    return () => {
-      client.off(ClientEvent.Sync, refresh);
-      client.off(RoomEvent.Timeline, refresh);
-      client.off(RoomEvent.Name, refresh);
-      client.off(RoomEvent.Receipt, refresh);
-    };
-  }, [client]);
+    refreshList();
+    const timer = setInterval(refreshList, REFRESH_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [refreshList]);
+
+  useFocusEffect(refreshList);
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>

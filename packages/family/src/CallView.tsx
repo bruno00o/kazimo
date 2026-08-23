@@ -7,11 +7,11 @@ import {
 } from "@livekit/components-react";
 import type { AppleAudioCategoryOption, AppleAudioConfiguration } from "@livekit/react-native";
 import { AudioSession, LiveKitRoom, VideoTrack } from "@livekit/react-native";
+import type { ClientLike } from "@unomed/react-native-matrix-sdk";
 import { ConnectionState, Room, Track } from "livekit-client";
-import type { MatrixClient } from "matrix-js-sdk";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import { joinRtc, leaveRtc, type RtcSession, rtcFocusUrl, type SfuToken, sfuToken } from "./call";
+import { joinRtc, leaveRtc, rtcFocusUrl, type SfuToken, sfuToken } from "./call";
 import { Icon, type IconName } from "./Icon";
 import type { Strings } from "./i18n";
 
@@ -88,7 +88,7 @@ export function CallView({
   initialVideo,
   onLeave,
 }: {
-  client: MatrixClient;
+  client: ClientLike;
   homeserver: string;
   roomId: string;
   title: string;
@@ -97,7 +97,7 @@ export function CallView({
   onLeave: () => void;
 }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
-  const session = useRef<RtcSession | null>(null);
+  const published = useRef(false);
 
   useEffect(() => {
     void startCallAudio(initialVideo).catch(() => {});
@@ -113,7 +113,9 @@ export function CallView({
         const serviceUrl = await rtcFocusUrl(homeserver);
         const token = await sfuToken(serviceUrl, client, roomId);
         if (cancelled) return;
-        session.current = joinRtc(client, roomId, serviceUrl);
+        published.current = true;
+        await joinRtc(client, roomId, serviceUrl);
+        if (cancelled) return;
         setLoad({ kind: "ready", token });
       } catch (error) {
         if (!cancelled) {
@@ -123,9 +125,9 @@ export function CallView({
     })();
     return () => {
       cancelled = true;
-      if (session.current) {
-        void leaveRtc(session.current);
-        session.current = null;
+      if (published.current) {
+        published.current = false;
+        void leaveRtc(client, roomId).catch(() => {});
       }
     };
   }, [client, homeserver, roomId]);

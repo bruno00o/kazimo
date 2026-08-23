@@ -1,6 +1,5 @@
-import type { MatrixClient } from "matrix-js-sdk";
-
-export type RtcSession = ReturnType<MatrixClient["matrixRTC"]["getRoomSession"]>;
+import type { ClientLike } from "@unomed/react-native-matrix-sdk";
+import { accessTokenOf } from "./matrix";
 
 export type SfuToken = {
   url: string;
@@ -11,6 +10,15 @@ export type SfuClaims = {
   room: string;
   identity: string;
 };
+
+const RTC_MEMBER_EVENT_TYPE = "org.matrix.msc3401.call.member";
+const RTC_APPLICATION = "m.call";
+const RTC_ROOM_CALL_ID = "";
+const RTC_ROOM_SCOPE = "m.room";
+const LIVEKIT_FOCUS_TYPE = "livekit";
+const OLDEST_MEMBERSHIP_SELECTION = "oldest_membership";
+const MEMBERSHIP_EXPIRY_MS = 4 * 60 * 60 * 1000;
+const CLEARED_MEMBERSHIP = {};
 
 export const rtcFocusUrl = async (homeserver: string): Promise<string> => {
   const res = await fetch(`${homeserver}/.well-known/matrix/client`);
@@ -25,19 +33,35 @@ export const rtcFocusUrl = async (homeserver: string): Promise<string> => {
   return focus.livekit_service_url;
 };
 
+const openIdToken = async (client: ClientLike): Promise<unknown> => {
+  const { homeserverUrl, userId } = client.session();
+  const res = await fetch(
+    `${homeserverUrl}/_matrix/client/v3/user/${encodeURIComponent(userId)}/openid/request_token`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessTokenOf(client)}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    },
+  );
+  if (!res.ok) throw new Error(`openid ${res.status} ${await res.text()}`);
+  return res.json();
+};
+
 export const sfuToken = async (
   serviceUrl: string,
-  client: MatrixClient,
+  client: ClientLike,
   roomName: string,
 ): Promise<SfuToken> => {
-  const openIdToken = await client.getOpenIdToken();
   const res = await fetch(`${serviceUrl}/sfu/get`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       room: roomName,
-      openid_token: openIdToken,
-      device_id: client.getDeviceId() ?? "",
+      openid_token: await openIdToken(client),
+      device_id: client.deviceId(),
     }),
   });
   if (!res.ok) throw new Error(`sfu ${res.status} ${await res.text()}`);
@@ -45,22 +69,42 @@ export const sfuToken = async (
   return { url: body.url, jwt: body.jwt };
 };
 
-export const joinRtc = (client: MatrixClient, roomId: string, serviceUrl: string): RtcSession => {
-  const room = client.getRoom(roomId);
-  if (!room) throw new Error(`unknown room ${roomId}`);
-  const userId = client.getUserId() ?? "";
-  const deviceId = client.getDeviceId() ?? "";
-  const focus = { type: "livekit", livekit_service_url: serviceUrl };
-  const session = client.matrixRTC.getRoomSession(room);
-  session.joinRTCSession({ userId, deviceId, memberId: `${userId}:${deviceId}` }, [focus], focus, {
-    manageMediaKeys: false,
-  });
-  return session;
+const membershipStateKey = (userId: string, deviceId: string): string =>
+  `_${userId}_${deviceId}_${RTC_APPLICATION}`;
+
+const putMembership = async (client: ClientLike, roomId: string, content: unknown): Promise<void> => {
+  const { homeserverUrl, userId, deviceId } = client.session();
+  const stateKey = membershipStateKey(userId, deviceId);
+  const res = await fetch(
+    `${homeserverUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${RTC_MEMBER_EVENT_TYPE}/${encodeURIComponent(stateKey)}`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${accessTokenOf(client)}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(content),
+    },
+  );
+  if (!res.ok) throw new Error(`rtc membership ${res.status} ${await res.text()}`);
 };
 
-export const leaveRtc = async (session: RtcSession): Promise<void> => {
-  await session.leaveRoomSession();
+export const joinRtc = async (client: ClientLike, roomId: string, serviceUrl: string): Promise<void> => {
+  const { userId, deviceId } = client.session();
+  await putMembership(client, roomId, {
+    application: RTC_APPLICATION,
+    call_id: RTC_ROOM_CALL_ID,
+    scope: RTC_ROOM_SCOPE,
+    device_id: deviceId,
+    membershipID: `${userId}:${deviceId}`,
+    expires: MEMBERSHIP_EXPIRY_MS,
+    focus_active: { type: LIVEKIT_FOCUS_TYPE, focus_selection: OLDEST_MEMBERSHIP_SELECTION },
+    foci_preferred: [{ type: LIVEKIT_FOCUS_TYPE, livekit_service_url: serviceUrl }],
+  });
 };
+
+export const leaveRtc = (client: ClientLike, roomId: string): Promise<void> =>
+  putMembership(client, roomId, CLEARED_MEMBERSHIP);
 
 export const sfuClaims = (jwt: string): SfuClaims | null => {
   try {

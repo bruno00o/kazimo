@@ -27,7 +27,7 @@ export default function CallScreen() {
         client={client}
         homeserver={homeserver}
         roomId={roomId}
-        title={client.getRoom(roomId)?.name ?? ""}
+        title={client.getRoom(roomId)?.displayName() ?? ""}
         strings={t}
         initialVideo={video !== AUDIO_ONLY_PARAM}
         onLeave={() => {

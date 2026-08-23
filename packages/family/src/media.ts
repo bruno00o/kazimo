@@ -1,4 +1,5 @@
-import type { ImageSource } from "expo-image";
+import { type ClientLike, MediaSource } from "@unomed/react-native-matrix-sdk";
+import { Directory, File, Paths } from "expo-file-system";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import {
   getMediaLibraryPermissionsAsync,
@@ -6,71 +7,32 @@ import {
   type MediaType,
   requestMediaLibraryPermissionsAsync,
 } from "expo-image-picker";
-import { type ISendEventResponse, type MatrixClient, MsgType } from "matrix-js-sdk";
 import { Blurhash } from "react-native-blurhash";
 
-const BEARER_PREFIX = "Bearer ";
 const BLURHASH_COMPONENTS_X = 4;
 const BLURHASH_COMPONENTS_Y = 3;
-const BLURHASH_KEY = "xyz.amorgan.blurhash";
+const CACHE_DIRECTORY = "matrix-media";
+const FULL_SIZE_KEY = "full";
 const PHOTO_COMPRESSION = 0.8;
-const PHOTO_FILE_NAME = "photo.jpg";
 const PHOTO_MEDIA_TYPES: MediaType[] = ["images"];
 const PHOTO_MIME_TYPE = "image/jpeg";
 const PICKER_QUALITY = 1;
-const RESIZE_METHOD = "scale";
-const ALLOW_DIRECT_LINKS = false;
-const USE_AUTHENTICATION = true;
-const NO_PROGRESS = 0;
 const SMALLEST_SIDE = 1;
+const UNSAFE_KEY_CHARACTERS = /[^a-zA-Z0-9]+/g;
+const KEY_SEPARATOR = "-";
+const USE_MEDIA_CACHE = true;
 
 export const CHAT_THUMBNAIL_EDGE = 1024;
 export const FULL_SCREEN_EDGE = 2048;
 export const UPLOAD_LONG_EDGE = 2048;
 
-export type Photo = { uri: string; width: number; height: number };
+export type Photo = { uri: string; width: number; height: number; size: number };
 
 export type PhotoToSend = Photo & { blurhash: string | null };
 
 export type BubbleSize = { width: number; height: number };
 
-type PhotoInfo = {
-  mimetype: string;
-  size: number;
-  w: number;
-  h: number;
-  [BLURHASH_KEY]?: string;
-};
-
-type PhotoEventContent = {
-  msgtype: MsgType.Image;
-  body: string;
-  url: string;
-  info: PhotoInfo;
-};
-
-export const authenticatedImageSource = (
-  client: MatrixClient,
-  mxc: string,
-  width: number,
-  height: number,
-): ImageSource => {
-  const uri = client.mxcUrlToHttp(
-    mxc,
-    width,
-    height,
-    RESIZE_METHOD,
-    ALLOW_DIRECT_LINKS,
-    undefined,
-    USE_AUTHENTICATION,
-  );
-  const token = client.getAccessToken();
-  return {
-    uri: uri ?? undefined,
-    headers: token === null ? undefined : { Authorization: `${BEARER_PREFIX}${token}` },
-    cacheKey: `${mxc}:${width}x${height}`,
-  };
-};
+export type MediaRef = { mxc: string; json: string | null };
 
 export const fitWithin = (
   width: number | null,
@@ -99,7 +61,14 @@ export const longEdgeResize = (
   return width >= height ? { width: maxLongEdge } : { height: maxLongEdge };
 };
 
-export const pickPhoto = async (): Promise<Photo | null> => {
+export const mediaCacheKey = (mxc: string, edge: number | null): string => {
+  const sanitized = mxc.replace(UNSAFE_KEY_CHARACTERS, KEY_SEPARATOR).replace(/^-|-$/g, "");
+  return `${sanitized}${KEY_SEPARATOR}${edge === null ? FULL_SIZE_KEY : edge}`;
+};
+
+export const localPathOf = (uri: string): string => uri.replace(/^file:\/\//, "");
+
+export const pickPhoto = async (): Promise<{ uri: string } | null> => {
   const current = await getMediaLibraryPermissionsAsync();
   const permission = current.granted ? current : await requestMediaLibraryPermissionsAsync();
   if (!permission.granted) return null;
@@ -110,8 +79,7 @@ export const pickPhoto = async (): Promise<Photo | null> => {
   });
   if (result.canceled) return null;
   const asset = result.assets[0];
-  if (!asset) return null;
-  return { uri: asset.uri, width: asset.width, height: asset.height };
+  return asset ? { uri: asset.uri } : null;
 };
 
 export const preparePhoto = async (uri: string): Promise<Photo> => {
@@ -120,7 +88,7 @@ export const preparePhoto = async (uri: string): Promise<Photo> => {
   const resize = longEdgeResize(loaded.width, loaded.height, UPLOAD_LONG_EDGE);
   const rendered = resize === null ? loaded : await context.resize(resize).renderAsync();
   const saved = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: PHOTO_COMPRESSION });
-  return { uri: saved.uri, width: saved.width, height: saved.height };
+  return { uri: saved.uri, width: saved.width, height: saved.height, size: new File(saved.uri).size };
 };
 
 export const blurhashOf = async (uri: string): Promise<string | null> => {
@@ -131,26 +99,28 @@ export const blurhashOf = async (uri: string): Promise<string | null> => {
   }
 };
 
-export const photoContent = (mxc: string, size: number, photo: PhotoToSend): PhotoEventContent => {
-  const info: PhotoInfo = { mimetype: PHOTO_MIME_TYPE, size, w: photo.width, h: photo.height };
-  if (photo.blurhash !== null) info[BLURHASH_KEY] = photo.blurhash;
-  return { msgtype: MsgType.Image, body: PHOTO_FILE_NAME, url: mxc, info };
+const cacheFile = (mxc: string, edge: number | null): File => {
+  const directory = new Directory(Paths.cache, CACHE_DIRECTORY);
+  if (!directory.exists) directory.create({ intermediates: true, idempotent: true });
+  return new File(directory, mediaCacheKey(mxc, edge));
 };
 
-export const sendPhoto = async (
-  client: MatrixClient,
-  roomId: string,
-  photo: PhotoToSend,
-  onProgress?: (fraction: number) => void,
-): Promise<ISendEventResponse> => {
-  const blob = await (await fetch(photo.uri)).blob();
-  const uploaded = await client.uploadContent(blob, {
-    type: PHOTO_MIME_TYPE,
-    name: PHOTO_FILE_NAME,
-    progressHandler:
-      onProgress === undefined
-        ? undefined
-        : ({ loaded, total }) => onProgress(total > 0 ? loaded / total : NO_PROGRESS),
-  });
-  return client.sendMessage(roomId, photoContent(uploaded.content_uri, blob.size, photo));
+const sourceOf = (ref: MediaRef) =>
+  ref.json === null ? MediaSource.fromUrl(ref.mxc) : MediaSource.fromJson(ref.json);
+
+export const photoUri = async (client: ClientLike, ref: MediaRef, edge: number | null): Promise<string> => {
+  const file = cacheFile(ref.mxc, edge);
+  if (file.exists) return file.uri;
+  const source = sourceOf(ref);
+
+  if (edge === null) {
+    const handle = await client.getMediaFile(source, undefined, PHOTO_MIME_TYPE, USE_MEDIA_CACHE, undefined);
+    if (handle.persist(localPathOf(file.uri))) return file.uri;
+    file.write(new Uint8Array(await client.getMediaContent(source)));
+    return file.uri;
+  }
+
+  const thumbnail = await client.getMediaThumbnail(source, BigInt(edge), BigInt(edge));
+  file.write(new Uint8Array(thumbnail));
+  return file.uri;
 };

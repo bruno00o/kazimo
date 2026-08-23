@@ -1,4 +1,10 @@
-import { type MatrixClient, type MatrixEvent, type Room, RoomStateEvent } from "matrix-js-sdk";
+import {
+  type ClientLike,
+  Membership,
+  type RoomInfo,
+  type RoomLike,
+  type TaskHandleLike,
+} from "@unomed/react-native-matrix-sdk";
 import {
   callUuid,
   dismiss,
@@ -10,9 +16,8 @@ import {
 } from "./callkeep";
 import type { Strings } from "./i18n";
 
-const RTC_MEMBER_TYPES = new Set(["org.matrix.msc3401.call.member", "m.rtc.member", "io.element.rtc.member"]);
-
 const INCOMING_DEFAULT_HAS_VIDEO = true;
+const ROOM_SCAN_INTERVAL_MS = 5000;
 
 export type IncomingCall = { roomId: string; title: string };
 
@@ -22,13 +27,14 @@ export type CallCenter = {
 };
 
 export const startCallCenter = async (
-  client: MatrixClient,
+  client: ClientLike,
   handlers: { onAnswer: (call: IncomingCall) => void; onRemoteEnd: (roomId: string) => void },
   strings: Strings,
 ): Promise<CallCenter> => {
-  const me = client.getUserId() ?? "";
+  const me = client.userId();
   const byRoom = new Map<string, string>();
   const byUuid = new Map<string, IncomingCall>();
+  const watchers = new Map<string, TaskHandleLike>();
   let answeredRoomId: string | null = null;
 
   await setupCallKeep(strings);
@@ -40,46 +46,50 @@ export const startCallCenter = async (
     if (answeredRoomId === roomId) answeredRoomId = null;
   };
 
-  const remoteInCall = (room: Room): boolean => {
-    for (const type of RTC_MEMBER_TYPES) {
-      for (const event of room.currentState.getStateEvents(type)) {
-        const sender = event.getSender();
-        if (sender && sender !== me && Object.keys(event.getContent()).length > 0) return true;
-      }
-    }
-    return false;
+  const remoteInCall = (info: RoomInfo): boolean =>
+    info.hasRoomCall &&
+    !info.activeRoomCallParticipants.includes(me) &&
+    info.activeRoomCallParticipants.some((participant) => participant !== me);
+
+  const callerOf = (info: RoomInfo): { handle: string; name: string } => {
+    const other = info.heroes.find((hero) => hero.userId !== me);
+    return {
+      handle: other?.userId ?? info.id,
+      name: other?.displayName ?? info.displayName ?? info.id,
+    };
   };
 
-  const callerOf = (room: Room): { handle: string; name: string } => {
-    const other = room.getJoinedMembers().find((member) => member.userId !== me);
-    return { handle: other?.userId ?? room.roomId, name: room.name };
-  };
-
-  const sync = (room: Room) => {
-    if (room.getMyMembership() !== "join") return;
-    const remote = remoteInCall(room);
-    const uuid = byRoom.get(room.roomId);
+  const sync = (info: RoomInfo) => {
+    if (info.membership !== Membership.Joined) return;
+    const remote = remoteInCall(info);
+    const uuid = byRoom.get(info.id);
     if (remote && !uuid) {
       const fresh = callUuid();
-      const { handle, name } = callerOf(room);
-      byRoom.set(room.roomId, fresh);
-      byUuid.set(fresh, { roomId: room.roomId, title: name });
+      const { handle, name } = callerOf(info);
+      byRoom.set(info.id, fresh);
+      byUuid.set(fresh, { roomId: info.id, title: name });
       ringIncoming(fresh, handle, name, INCOMING_DEFAULT_HAS_VIDEO);
       return;
     }
     if (!remote && uuid) {
       dismiss(uuid);
-      const wasAnswered = answeredRoomId === room.roomId;
-      clear(room.roomId);
-      if (wasAnswered) handlers.onRemoteEnd(room.roomId);
+      const wasAnswered = answeredRoomId === info.id;
+      clear(info.id);
+      if (wasAnswered) handlers.onRemoteEnd(info.id);
     }
   };
 
-  const onState = (event: MatrixEvent) => {
-    if (!RTC_MEMBER_TYPES.has(event.getType())) return;
-    const roomId = event.getRoomId();
-    const room = roomId ? client.getRoom(roomId) : null;
-    if (room) sync(room);
+  const watch = (room: RoomLike) => {
+    if (watchers.has(room.id())) return;
+    watchers.set(room.id(), room.subscribeToRoomInfoUpdates({ call: sync }));
+    void room
+      .roomInfo()
+      .then(sync)
+      .catch(() => {});
+  };
+
+  const scan = () => {
+    for (const room of client.rooms()) watch(room);
   };
 
   const offAnswer = onCallEvent("answerCall", (uuid) => {
@@ -98,8 +108,8 @@ export const startCallCenter = async (
     if (wasAnswered) handlers.onRemoteEnd(call.roomId);
   });
 
-  client.on(RoomStateEvent.Events, onState);
-  for (const room of client.getRooms()) sync(room);
+  scan();
+  const scanner = setInterval(scan, ROOM_SCAN_INTERVAL_MS);
 
   return {
     hangup(roomId) {
@@ -108,7 +118,9 @@ export const startCallCenter = async (
       clear(roomId);
     },
     stop() {
-      client.off(RoomStateEvent.Events, onState);
+      clearInterval(scanner);
+      for (const watcher of watchers.values()) watcher.cancel();
+      watchers.clear();
       offAnswer();
       offEnd();
       dismissAll();

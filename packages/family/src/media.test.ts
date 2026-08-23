@@ -1,6 +1,43 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
-import { type MatrixClient, MsgType } from "matrix-js-sdk";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
+import type { ClientLike } from "@unomed/react-native-matrix-sdk";
 
+const CACHE_URI = "file:///cache";
+
+const stored = new Map<string, Uint8Array>();
+const created: string[] = [];
+
+class FakeDirectory {
+  uri: string;
+  constructor(...parts: (string | { uri: string })[]) {
+    this.uri = parts.map((part) => (typeof part === "string" ? part : part.uri)).join("/");
+  }
+  get exists() {
+    return created.includes(this.uri);
+  }
+  create() {
+    created.push(this.uri);
+  }
+}
+
+class FakeFile {
+  uri: string;
+  size = 0;
+  constructor(...parts: (string | { uri: string })[]) {
+    this.uri = parts.map((part) => (typeof part === "string" ? part : part.uri)).join("/");
+  }
+  get exists() {
+    return stored.has(this.uri);
+  }
+  write(bytes: Uint8Array) {
+    stored.set(this.uri, bytes);
+  }
+}
+
+mock.module("expo-file-system", () => ({
+  Directory: FakeDirectory,
+  File: FakeFile,
+  Paths: { cache: { uri: CACHE_URI } },
+}));
 mock.module("expo-image-manipulator", () => ({
   ImageManipulator: { manipulate: () => ({}) },
   SaveFormat: { JPEG: "jpeg" },
@@ -11,22 +48,64 @@ mock.module("expo-image-picker", () => ({
   requestMediaLibraryPermissionsAsync: async () => ({ granted: false }),
 }));
 mock.module("react-native-blurhash", () => ({ Blurhash: { encode: async () => "" } }));
+mock.module("@unomed/react-native-matrix-sdk", () => ({
+  MediaSource: {
+    fromUrl: (url: string) => ({ from: "url", url }),
+    fromJson: (json: string) => ({ from: "json", json }),
+  },
+  messageEventContentFromMarkdown: (body: string) => ({ body }),
+  ReceiptType: { Read: 0, ReadPrivate: 1, FullyRead: 2 },
+  UploadSource: { File: class {} },
+}));
 
 const {
-  authenticatedImageSource,
   CHAT_THUMBNAIL_EDGE,
   fitWithin,
+  localPathOf,
   longEdgeResize,
-  photoContent,
-  sendPhoto,
+  mediaCacheKey,
+  photoUri,
   UPLOAD_LONG_EDGE,
 } = await import("./media");
 
-const ROOM_ID = "!room:kazimo.test";
 const MXC = "mxc://kazimo.test/praia";
-const TOKEN = "syt_token";
 const MAX_BUBBLE_WIDTH = 260;
 const MAX_BUBBLE_HEIGHT = 340;
+const THUMBNAIL_URI = `${CACHE_URI}/matrix-media/mxc-kazimo-test-praia-1024`;
+const FULL_URI = `${CACHE_URI}/matrix-media/mxc-kazimo-test-praia-full`;
+
+const bytesOf = (values: number[]) => new Uint8Array(values).buffer;
+
+type Calls = { thumbnails: unknown[][]; files: unknown[][]; contents: unknown[][]; persisted: string[] };
+
+const clientWith = (calls: Calls, options: { persists: boolean }): ClientLike =>
+  ({
+    getMediaThumbnail: async (source: unknown, width: bigint, height: bigint) => {
+      calls.thumbnails.push([source, width, height]);
+      return bytesOf([1, 2, 3]);
+    },
+    getMediaFile: async (source: unknown, ...rest: unknown[]) => {
+      calls.files.push([source, ...rest]);
+      return {
+        path: () => "/tmp/rust-media",
+        persist: (path: string) => {
+          calls.persisted.push(path);
+          return options.persists;
+        },
+      };
+    },
+    getMediaContent: async (source: unknown) => {
+      calls.contents.push([source]);
+      return bytesOf([9, 9]);
+    },
+  }) as unknown as ClientLike;
+
+const noCalls = (): Calls => ({ thumbnails: [], files: [], contents: [], persisted: [] });
+
+beforeEach(() => {
+  stored.clear();
+  created.length = 0;
+});
 
 describe("fitWithin", () => {
   test("a landscape photo is bound by the width", () => {
@@ -75,170 +154,70 @@ describe("longEdgeResize", () => {
   });
 });
 
-describe("authenticatedImageSource", () => {
-  const clientWith = (
-    calls: unknown[][],
-    { uri, token }: { uri: string | null; token: string | null },
-  ): MatrixClient =>
-    ({
-      mxcUrlToHttp: (...args: unknown[]) => {
-        calls.push(args);
-        return uri;
-      },
-      getAccessToken: () => token,
-    }) as unknown as MatrixClient;
-
-  test("asks for an authenticated thumbnail and carries the bearer token", () => {
-    const calls: unknown[][] = [];
-    const client = clientWith(calls, { uri: "https://kazimo.test/thumbnail", token: TOKEN });
-    const source = authenticatedImageSource(client, MXC, CHAT_THUMBNAIL_EDGE, CHAT_THUMBNAIL_EDGE);
-    expect(calls).toEqual([[MXC, 1024, 1024, "scale", false, undefined, true]]);
-    expect(source).toEqual({
-      uri: "https://kazimo.test/thumbnail",
-      headers: { Authorization: `Bearer ${TOKEN}` },
-      cacheKey: `${MXC}:1024x1024`,
-    });
+describe("mediaCacheKey", () => {
+  test("a media id becomes a safe file name carrying its size", () => {
+    expect(mediaCacheKey(MXC, CHAT_THUMBNAIL_EDGE)).toBe("mxc-kazimo-test-praia-1024");
+    expect(mediaCacheKey(MXC, null)).toBe("mxc-kazimo-test-praia-full");
   });
 
-  test("the cache key survives a token refresh", () => {
-    const calls: unknown[][] = [];
-    const first = authenticatedImageSource(
-      clientWith(calls, { uri: "https://kazimo.test/a", token: "one" }),
-      MXC,
-      2048,
-      2048,
-    );
-    const second = authenticatedImageSource(
-      clientWith(calls, { uri: "https://kazimo.test/a", token: "two" }),
-      MXC,
-      2048,
-      2048,
-    );
-    expect(first.cacheKey).toBe(second.cacheKey as string);
-    expect(second.headers).toEqual({ Authorization: "Bearer two" });
+  test("two sizes of the same photo never share a file", () => {
+    expect(mediaCacheKey(MXC, 1024)).not.toBe(mediaCacheKey(MXC, 2048));
   });
 
-  test("an unusable mxc url and a missing token yield an empty source", () => {
-    const source = authenticatedImageSource(
-      clientWith([], { uri: null, token: null }),
-      MXC,
-      CHAT_THUMBNAIL_EDGE,
-      CHAT_THUMBNAIL_EDGE,
-    );
-    expect(source.uri).toBe(undefined);
-    expect(source.headers).toBe(undefined);
+  test("two photos never share a file", () => {
+    expect(mediaCacheKey(MXC, 1024)).not.toBe(mediaCacheKey("mxc://kazimo.test/serra", 1024));
   });
 });
 
-describe("photoContent", () => {
-  test("describes the image with its dimensions and blurhash", () => {
-    expect(
-      photoContent(MXC, 4096, { uri: "file:///a.jpg", width: 2048, height: 1536, blurhash: "LEHV6" }),
-    ).toEqual({
-      msgtype: MsgType.Image,
-      body: "photo.jpg",
-      url: MXC,
-      info: {
-        mimetype: "image/jpeg",
-        size: 4096,
-        w: 2048,
-        h: 1536,
-        "xyz.amorgan.blurhash": "LEHV6",
-      },
-    });
-  });
-
-  test("omits the blurhash key when there is none", () => {
-    const content = photoContent(MXC, 4096, {
-      uri: "file:///a.jpg",
-      width: 2048,
-      height: 1536,
-      blurhash: null,
-    });
-    expect(content.info).toEqual({ mimetype: "image/jpeg", size: 4096, w: 2048, h: 1536 });
-    expect("xyz.amorgan.blurhash" in content.info).toBe(false);
+describe("localPathOf", () => {
+  test("the rust sdk wants a system path, not a file uri", () => {
+    expect(localPathOf("file:///cache/a")).toBe("/cache/a");
+    expect(localPathOf("/cache/a")).toBe("/cache/a");
   });
 });
 
-describe("sendPhoto", () => {
-  const originalFetch = globalThis.fetch;
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
+describe("photoUri", () => {
+  test("a photo already in the cache is served without asking the homeserver", async () => {
+    stored.set(THUMBNAIL_URI, new Uint8Array([1]));
+    const calls = noCalls();
+    const uri = await photoUri(clientWith(calls, { persists: true }), { mxc: MXC, json: null }, 1024);
+    expect(uri).toBe(THUMBNAIL_URI);
+    expect(calls.thumbnails).toEqual([]);
   });
 
-  const stubFetch = (blob: Blob) => {
-    globalThis.fetch = (async () => new Response(blob)) as unknown as typeof fetch;
-  };
-
-  test("uploads with an explicit type and name, then sends the image event", async () => {
-    stubFetch(new Blob([new Uint8Array(12)]));
-    const uploads: unknown[][] = [];
-    const sends: unknown[][] = [];
-    const client = {
-      uploadContent: async (file: unknown, opts: unknown) => {
-        uploads.push([file, opts]);
-        return { content_uri: MXC };
-      },
-      sendMessage: async (roomId: string, content: unknown) => {
-        sends.push([roomId, content]);
-        return { event_id: "$sent" };
-      },
-    } as unknown as MatrixClient;
-
-    const sent = await sendPhoto(client, ROOM_ID, {
-      uri: "file:///a.jpg",
-      width: 2048,
-      height: 1536,
-      blurhash: "LEHV6",
-    });
-
-    expect(sent).toEqual({ event_id: "$sent" });
-    expect(uploads).toHaveLength(1);
-    expect(uploads[0]?.[1]).toMatchObject({ type: "image/jpeg", name: "photo.jpg" });
-    expect(sends[0]?.[0]).toBe(ROOM_ID);
-    expect(sends[0]?.[1]).toMatchObject({
-      msgtype: "m.image",
-      url: MXC,
-      info: { size: 12, w: 2048, h: 1536, "xyz.amorgan.blurhash": "LEHV6" },
-    });
+  test("a thumbnail is fetched at the asked size and written to the cache", async () => {
+    const calls = noCalls();
+    const uri = await photoUri(clientWith(calls, { persists: true }), { mxc: MXC, json: null }, 1024);
+    expect(uri).toBe(THUMBNAIL_URI);
+    expect(calls.thumbnails).toEqual([[{ from: "url", url: MXC }, 1024n, 1024n]]);
+    expect(stored.get(THUMBNAIL_URI)).toEqual(new Uint8Array([1, 2, 3]));
   });
 
-  test("reports the upload progress as a fraction", async () => {
-    stubFetch(new Blob([new Uint8Array(4)]));
-    const fractions: number[] = [];
-    const client = {
-      uploadContent: async (_file: unknown, opts: { progressHandler?: (p: unknown) => void }) => {
-        opts.progressHandler?.({ loaded: 2, total: 4 });
-        opts.progressHandler?.({ loaded: 4, total: 4 });
-        opts.progressHandler?.({ loaded: 0, total: 0 });
-        return { content_uri: MXC };
-      },
-      sendMessage: async () => ({ event_id: "$sent" }),
-    } as unknown as MatrixClient;
-
-    await sendPhoto(
-      client,
-      ROOM_ID,
-      { uri: "file:///a.jpg", width: 10, height: 10, blurhash: null },
-      (fraction) => fractions.push(fraction),
-    );
-
-    expect(fractions).toEqual([0.5, 1, 0]);
+  test("the full size photo is persisted out of the temporary file handle", async () => {
+    const calls = noCalls();
+    const uri = await photoUri(clientWith(calls, { persists: true }), { mxc: MXC, json: null }, null);
+    expect(uri).toBe(FULL_URI);
+    expect(calls.persisted).toEqual(["/cache/matrix-media/mxc-kazimo-test-praia-full"]);
+    expect(calls.contents).toEqual([]);
   });
 
-  test("leaves no progress handler when nobody listens", async () => {
-    stubFetch(new Blob([new Uint8Array(4)]));
-    const seen: unknown[] = [];
-    const client = {
-      uploadContent: async (_file: unknown, opts: { progressHandler?: unknown }) => {
-        seen.push(opts.progressHandler);
-        return { content_uri: MXC };
-      },
-      sendMessage: async () => ({ event_id: "$sent" }),
-    } as unknown as MatrixClient;
+  test("a handle that refuses to persist falls back to downloading the bytes", async () => {
+    const calls = noCalls();
+    const uri = await photoUri(clientWith(calls, { persists: false }), { mxc: MXC, json: null }, null);
+    expect(uri).toBe(FULL_URI);
+    expect(calls.contents).toHaveLength(1);
+    expect(stored.get(FULL_URI)).toEqual(new Uint8Array([9, 9]));
+  });
 
-    await sendPhoto(client, ROOM_ID, { uri: "file:///a.jpg", width: 10, height: 10, blurhash: null });
-    expect(seen).toEqual([undefined]);
+  test("an encrypted photo is rebuilt from its serialised source", async () => {
+    const calls = noCalls();
+    await photoUri(clientWith(calls, { persists: true }), { mxc: MXC, json: '{"Encrypted":{}}' }, 1024);
+    expect(calls.thumbnails[0]?.[0]).toEqual({ from: "json", json: '{"Encrypted":{}}' });
+  });
+
+  test("the cache directory is created once, on demand", async () => {
+    const calls = noCalls();
+    await photoUri(clientWith(calls, { persists: true }), { mxc: MXC, json: null }, 1024);
+    expect(created).toEqual([`${CACHE_URI}/matrix-media`]);
   });
 });

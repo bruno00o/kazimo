@@ -1,6 +1,6 @@
 import { tokens } from "@kazimo/shared";
+import type { ClientLike } from "@unomed/react-native-matrix-sdk";
 import { useRouter } from "expo-router";
-import { HttpApiEvent, type MatrixClient, TokenRefreshLogoutError } from "matrix-js-sdk";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import Login from "../app/login";
@@ -11,17 +11,19 @@ import {
   refreshSession,
   signOut as revokeAndForget,
   type StoredSession,
-  tokenRefresherFor,
 } from "./auth";
 import { type CallCenter, startCallCenter } from "./calls";
 import { readEnv } from "./env";
 import { appStrings } from "./i18n";
-import { type Identity, startSession, whoami } from "./session";
+import { type MatrixHandle, startMatrix } from "./matrix";
+import { acceptInvites, endSession, type Identity, whoami } from "./session";
 
 const t = appStrings();
 
+const LOGOUT_ERROR_NAME = "TokenRefreshLogoutError";
+
 type Session = {
-  client: MatrixClient;
+  client: ClientLike;
   homeserver: string;
   identity: Identity;
   center: CallCenter | null;
@@ -42,7 +44,7 @@ type Credentials =
   | { kind: "env"; homeserver: string; token: string };
 
 type Connected = {
-  client: MatrixClient;
+  handle: MatrixHandle;
   homeserver: string;
   identity: Identity;
   stored: StoredSession | null;
@@ -61,34 +63,31 @@ const credentialsOf = (stored: StoredSession | null): Credentials | null => {
   return env ? { kind: "env", homeserver: env.homeserver, token: env.token } : null;
 };
 
-const open = async (
-  homeserver: string,
-  token: string,
-  stored: StoredSession | null,
-  onRefresh?: (session: StoredSession) => void,
-): Promise<Connected> => {
+const open = async (homeserver: string, token: string, stored: StoredSession | null): Promise<Connected> => {
   const identity = await whoami(homeserver, token);
-  const refresh =
-    stored?.refreshToken && onRefresh
-      ? { refreshToken: stored.refreshToken, tokenRefreshFunction: tokenRefresherFor(stored, onRefresh) }
-      : undefined;
-  const client = await startSession(homeserver, token, identity, refresh);
-  return { client, homeserver, identity, stored };
+  const handle = await startMatrix(
+    {
+      homeserver,
+      accessToken: token,
+      refreshToken: stored?.refreshToken ?? undefined,
+      userId: identity.userId,
+      deviceId: identity.deviceId || (stored?.deviceId ?? ""),
+    },
+    { bootstrapIdentity: false },
+  );
+  await acceptInvites(handle.client).catch(() => undefined);
+  return { handle, homeserver, identity, stored };
 };
 
-const connect = async (
-  credentials: Credentials,
-  onRefresh: (session: StoredSession) => void,
-): Promise<Connected> => {
+const connect = async (credentials: Credentials): Promise<Connected> => {
   if (credentials.kind === "env") return open(credentials.homeserver, credentials.token, null);
   const stored = credentials.session;
   const fresh = isExpiringSoon(stored, Date.now()) ? await refreshSession(stored) : stored;
-  const connected = await open(fresh.homeserver, fresh.accessToken, fresh, onRefresh).catch(async (error) => {
+  return open(fresh.homeserver, fresh.accessToken, fresh).catch(async (error) => {
     if (!fresh.refreshToken) throw error;
     const refreshed = await refreshSession(fresh);
-    return open(refreshed.homeserver, refreshed.accessToken, refreshed, onRefresh);
+    return open(refreshed.homeserver, refreshed.accessToken, refreshed);
   });
-  return connected;
 };
 
 export function SessionProvider({ children }: { children: ReactNode }) {
@@ -103,10 +102,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => {
       if (dismissers.current.get(roomId) === dismiss) dismissers.current.delete(roomId);
     };
-  }, []);
-
-  const rememberStored = useCallback((session: StoredSession) => {
-    latestStored.current = session;
   }, []);
 
   useEffect(() => {
@@ -130,16 +125,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
-        const connected = await connect(credentials, rememberStored);
+        const connected = await connect(credentials);
         if (cancelled) {
-          connected.client.stopClient();
+          await endSession(connected.handle).catch(() => undefined);
           return;
         }
         latestStored.current = connected.stored;
         setPhase({ kind: "ready", connected });
       } catch (error) {
         if (cancelled) return;
-        if (error instanceof TokenRefreshLogoutError) {
+        if (error instanceof Error && error.name === LOGOUT_ERROR_NAME) {
           await clearSession().catch(() => undefined);
           setPhase({ kind: "signedOut" });
           return;
@@ -150,28 +145,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [credentials, rememberStored]);
+  }, [credentials]);
 
-  const client = phase.kind === "ready" ? phase.connected.client : null;
+  const handle = phase.kind === "ready" ? phase.connected.handle : null;
+  const client = handle?.client ?? null;
 
   const signOut = useCallback(async () => {
-    client?.stopClient();
+    if (handle) await endSession(handle).catch(() => undefined);
     const stored = latestStored.current;
     latestStored.current = null;
     if (stored) await revokeAndForget(stored).catch(() => undefined);
     setPhase({ kind: "signedOut" });
-  }, [client]);
-
-  useEffect(() => {
-    if (!client) return;
-    const onLoggedOut = () => {
-      void signOut();
-    };
-    client.on(HttpApiEvent.SessionLoggedOut, onLoggedOut);
-    return () => {
-      client.off(HttpApiEvent.SessionLoggedOut, onLoggedOut);
-    };
-  }, [client, signOut]);
+  }, [handle]);
 
   useEffect(() => {
     if (!client) return;
@@ -213,7 +198,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   return (
     <SessionContext.Provider
       value={{
-        client: phase.connected.client,
+        client: phase.connected.handle.client,
         homeserver: phase.connected.homeserver,
         identity: phase.connected.identity,
         center,

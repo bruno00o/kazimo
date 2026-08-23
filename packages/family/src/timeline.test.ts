@@ -1,71 +1,99 @@
-import { describe, expect, test } from "bun:test";
-import { EventStatus, type IContent, type IEvent, type MatrixClient, MatrixEvent } from "matrix-js-sdk";
-import { localDayKey, messageOf, readUpTo, sendText, setTyping, toChatItems, typingNames } from "./timeline";
+import { describe, expect, mock, test } from "bun:test";
+import type { TimelineEntry } from "./timeline";
 
-const ROOM_ID = "!room:kazimo.test";
+mock.module("@unomed/react-native-matrix-sdk", () => ({
+  MediaSource: { fromUrl: (url: string) => ({ url }), fromJson: (json: string) => ({ json }) },
+  messageEventContentFromMarkdown: (body: string) => ({ body }),
+  ReceiptType: { Read: 0, ReadPrivate: 1, FullyRead: 2 },
+  UploadSource: { File: class {} },
+}));
+
+const {
+  applyTimelineDiff,
+  bodyOf,
+  chatItemsOf,
+  imageInfoOf,
+  latestMessageOf,
+  localDayKey,
+  localpartOf,
+  mediaSourceJsonOf,
+  readSetOf,
+  readUpTo,
+  receiptUserIdsOf,
+  senderNameOf,
+  sendStateOf,
+  typingNamesOf,
+  uploadPathOf,
+} = await import("./timeline");
+
 const ME = "@avo:kazimo.test";
 const RUI = "@rui:kazimo.test";
+const MXC = "mxc://kazimo.test/praia";
 
 const at = (day: number, hour: number) => new Date(2026, 7, day, hour, 0, 0).getTime();
 
-const nameOf = (userId: string) => (userId === RUI ? "Rui" : "Avo");
-
-const redactionOf = (targetId: string): IEvent => ({
-  event_id: `${targetId}-redaction`,
-  room_id: ROOM_ID,
-  sender: RUI,
-  type: "m.room.redaction",
-  origin_server_ts: 0,
-  content: {},
-  unsigned: {},
-  redacts: targetId,
+const textContent = (msgType: string, body: string) => ({
+  tag: "MsgLike",
+  inner: {
+    content: {
+      kind: {
+        tag: "Message",
+        inner: { content: { msgType: { tag: msgType, inner: { content: { body } } }, body } },
+      },
+      reactions: [],
+    },
+  },
 });
 
-const eventOf = (
-  id: string,
-  sender: string,
-  timestamp: number,
-  content: IContent,
-  extra: { type?: string; redacted?: boolean } = {},
-) =>
-  new MatrixEvent({
-    event_id: id,
-    room_id: ROOM_ID,
-    sender,
-    type: extra.type ?? "m.room.message",
-    origin_server_ts: timestamp,
-    content,
-    unsigned: extra.redacted ? { redacted_because: redactionOf(id) } : {},
-  });
+const imageContent = (
+  image: Record<string, unknown>,
+  source: { url?: () => string; toJson?: () => string } = { url: () => MXC },
+) => ({
+  tag: "MsgLike",
+  inner: {
+    content: {
+      kind: {
+        tag: "Message",
+        inner: {
+          content: {
+            body: "praia.jpg",
+            msgType: { tag: "Image", inner: { content: { source, ...image } } },
+          },
+        },
+      },
+      reactions: [],
+    },
+  },
+});
 
-const textEvent = (id: string, sender: string, timestamp: number, body: string) =>
-  eventOf(id, sender, timestamp, { msgtype: "m.text", body });
+const entry = (over: Partial<TimelineEntry> & Pick<TimelineEntry, "id">): TimelineEntry => ({
+  senderId: RUI,
+  senderName: "Rui",
+  timestamp: at(20, 9),
+  message: { kind: "text", body: "bom dia" },
+  sendState: "sent",
+  readByOthers: false,
+  sourceJson: null,
+  ...over,
+});
 
-const messages = (items: ReturnType<typeof toChatItems>) => items.filter((item) => item.kind !== "dayMarker");
+const messages = (items: ReturnType<typeof chatItemsOf>) => items.filter((item) => item.kind !== "dayMarker");
 
-describe("messageOf", () => {
+describe("bodyOf", () => {
   test("maps text, emote and notice to text", () => {
-    for (const msgtype of ["m.text", "m.emote", "m.notice"]) {
-      const event = eventOf("$1", RUI, at(20, 9), { msgtype, body: "bom dia" });
-      expect(messageOf(event)).toEqual({ kind: "text", body: "bom dia" });
+    for (const msgType of ["Text", "Emote", "Notice"]) {
+      expect(bodyOf(textContent(msgType, "bom dia"))).toEqual({ kind: "text", body: "bom dia" });
     }
   });
 
-  test("ignores non message events and unsupported msgtypes", () => {
-    expect(messageOf(eventOf("$1", RUI, at(20, 9), { name: "Familia" }, { type: "m.room.name" }))).toBe(null);
-    expect(messageOf(eventOf("$2", RUI, at(20, 9), { msgtype: "m.file", url: "mxc://x/y" }))).toBe(null);
-  });
-
-  test("reads blurhash and dimensions from info", () => {
-    const event = eventOf("$1", RUI, at(20, 9), {
-      msgtype: "m.image",
-      body: "praia.jpg",
-      url: "mxc://kazimo.test/praia",
-      info: { w: 1600, h: 900, "xyz.amorgan.blurhash": "LEHV6nWB2yk8" },
+  test("reads dimensions and blurhash from the image info", () => {
+    const content = imageContent({
+      filename: "praia.jpg",
+      info: { width: 1600n, height: 900n, blurhash: "LEHV6nWB2yk8" },
     });
-    expect(messageOf(event)).toEqual({
+    expect(bodyOf(content)).toEqual({
       kind: "image",
-      mxc: "mxc://kazimo.test/praia",
+      mxc: MXC,
       width: 1600,
       height: 900,
       blurhash: "LEHV6nWB2yk8",
@@ -74,14 +102,9 @@ describe("messageOf", () => {
   });
 
   test("missing image info yields nulls", () => {
-    const event = eventOf("$1", RUI, at(20, 9), {
-      msgtype: "m.image",
-      body: "praia.jpg",
-      url: "mxc://kazimo.test/praia",
-    });
-    expect(messageOf(event)).toEqual({
+    expect(bodyOf(imageContent({ filename: "praia.jpg" }))).toEqual({
       kind: "image",
-      mxc: "mxc://kazimo.test/praia",
+      mxc: MXC,
       width: null,
       height: null,
       blurhash: null,
@@ -89,93 +112,143 @@ describe("messageOf", () => {
     });
   });
 
-  test("caption is the body only when filename differs from it", () => {
-    const withCaption = eventOf("$1", RUI, at(20, 9), {
-      msgtype: "m.image",
-      body: "a praia hoje",
-      filename: "praia.jpg",
-      url: "mxc://kazimo.test/praia",
+  test("the caption comes from the caption field, not the filename", () => {
+    expect(bodyOf(imageContent({ filename: "praia.jpg", caption: "a praia hoje" }))).toMatchObject({
+      caption: "a praia hoje",
     });
-    const withoutCaption = eventOf("$2", RUI, at(20, 9), {
-      msgtype: "m.image",
-      body: "praia.jpg",
-      filename: "praia.jpg",
-      url: "mxc://kazimo.test/praia",
-    });
-    expect(messageOf(withCaption)).toMatchObject({ caption: "a praia hoje" });
-    expect(messageOf(withoutCaption)).toMatchObject({ caption: null });
   });
 
-  test("an image without a url is not renderable", () => {
-    expect(messageOf(eventOf("$1", RUI, at(20, 9), { msgtype: "m.image", body: "praia.jpg" }))).toBe(null);
+  test("an image whose source has no url is not renderable", () => {
+    expect(bodyOf(imageContent({ filename: "praia.jpg" }, {}))).toBe(null);
   });
 
-  test("skips redacted events", () => {
-    const event = eventOf("$1", RUI, at(20, 9), { msgtype: "m.text", body: "apagado" }, { redacted: true });
-    expect(messageOf(event)).toBe(null);
+  test("skips redacted messages and events we cannot decrypt", () => {
+    for (const tag of ["Redacted", "UnableToDecrypt", "Poll", "Sticker", "Other"]) {
+      expect(bodyOf({ tag: "MsgLike", inner: { content: { kind: { tag }, reactions: [] } } })).toBe(null);
+    }
   });
 
-  test("skips edits and reactions, which are not standalone messages", () => {
-    const edit = eventOf("$edit", RUI, at(20, 9), {
-      msgtype: "m.text",
-      body: "* corrigido",
-      "m.new_content": { msgtype: "m.text", body: "corrigido" },
-      "m.relates_to": { rel_type: "m.replace", event_id: "$1" },
-    });
-    const reaction = eventOf(
-      "$reaction",
-      RUI,
-      at(20, 9),
-      { "m.relates_to": { rel_type: "m.annotation", event_id: "$1", key: "love" } },
-      { type: "m.reaction" },
-    );
-    expect(messageOf(edit)).toBe(null);
-    expect(messageOf(reaction)).toBe(null);
+  test("skips content that is not message like", () => {
+    for (const tag of ["RoomMembership", "ProfileChange", "State", "CallInvite"]) {
+      expect(bodyOf({ tag, inner: { content: {} } })).toBe(null);
+    }
   });
 
-  test("renders the replacement content of an edited event", () => {
-    const original = textEvent("$1", RUI, at(20, 9), "bom dai");
-    const edit = eventOf("$edit", RUI, at(20, 10), {
-      msgtype: "m.text",
-      body: "* bom dia",
-      "m.new_content": { msgtype: "m.text", body: "bom dia" },
-      "m.relates_to": { rel_type: "m.replace", event_id: "$1" },
-    });
-    original.makeReplaced(edit);
-    expect(messageOf(original)).toEqual({ kind: "text", body: "bom dia" });
+  test("skips message types we do not render", () => {
+    expect(bodyOf(textContent("File", "relatorio.pdf"))).toBe(null);
+    expect(bodyOf(textContent("Video", "ferias.mp4"))).toBe(null);
   });
 
-  test("an edit can turn an image caption into a new one", () => {
-    const original = eventOf("$1", RUI, at(20, 9), {
-      msgtype: "m.image",
-      body: "praia.jpg",
-      filename: "praia.jpg",
-      url: "mxc://kazimo.test/praia",
-    });
-    const edit = eventOf("$edit", RUI, at(20, 10), {
-      msgtype: "m.image",
-      body: "* a praia hoje",
-      "m.new_content": {
-        msgtype: "m.image",
-        body: "a praia hoje",
-        filename: "praia.jpg",
-        url: "mxc://kazimo.test/praia",
-      },
-      "m.relates_to": { rel_type: "m.replace", event_id: "$1" },
-    });
-    original.makeReplaced(edit);
-    expect(messageOf(original)).toMatchObject({ caption: "a praia hoje" });
+  test("survives a shape it does not recognise", () => {
+    expect(bodyOf(null)).toBe(null);
+    expect(bodyOf(undefined)).toBe(null);
+    expect(bodyOf("MsgLike")).toBe(null);
+    expect(bodyOf({ tag: "MsgLike" })).toBe(null);
+    expect(bodyOf({ tag: "MsgLike", inner: { content: { kind: { tag: "Message" } } } })).toBe(null);
   });
 });
 
-describe("toChatItems", () => {
-  test("carries sender identity and resolves the display name", () => {
-    const items = toChatItems([textEvent("$1", RUI, at(20, 9), "bom dia")], ME, nameOf);
-    expect(items).toEqual([
+describe("mediaSourceJsonOf", () => {
+  test("carries the serialised media source of an image", () => {
+    const content = imageContent(
+      { filename: "praia.jpg" },
+      { url: () => MXC, toJson: () => '{"Plain":"a"}' },
+    );
+    expect(mediaSourceJsonOf(content)).toBe('{"Plain":"a"}');
+  });
+
+  test("a text message has no media source", () => {
+    expect(mediaSourceJsonOf(textContent("Text", "bom dia"))).toBe(null);
+  });
+});
+
+describe("applyTimelineDiff", () => {
+  const base = ["a", "b", "c"];
+
+  test("appends and resets whole batches", () => {
+    expect(applyTimelineDiff(base, { tag: "Append", inner: { values: ["d", "e"] } })).toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+    ]);
+    expect(applyTimelineDiff(base, { tag: "Reset", inner: { values: ["x"] } })).toEqual(["x"]);
+  });
+
+  test("clears the whole list", () => {
+    expect(applyTimelineDiff(base, { tag: "Clear" })).toEqual([]);
+  });
+
+  test("pushes at either end", () => {
+    expect(applyTimelineDiff(base, { tag: "PushFront", inner: { value: "z" } })).toEqual([
+      "z",
+      "a",
+      "b",
+      "c",
+    ]);
+    expect(applyTimelineDiff(base, { tag: "PushBack", inner: { value: "z" } })).toEqual(["a", "b", "c", "z"]);
+  });
+
+  test("pops at either end and never underflows", () => {
+    expect(applyTimelineDiff(base, { tag: "PopFront" })).toEqual(["b", "c"]);
+    expect(applyTimelineDiff(base, { tag: "PopBack" })).toEqual(["a", "b"]);
+    expect(applyTimelineDiff([], { tag: "PopFront" })).toEqual([]);
+    expect(applyTimelineDiff([], { tag: "PopBack" })).toEqual([]);
+  });
+
+  test("inserts at an index, including one past the end", () => {
+    expect(applyTimelineDiff(base, { tag: "Insert", inner: { index: 1, value: "z" } })).toEqual([
+      "a",
+      "z",
+      "b",
+      "c",
+    ]);
+    expect(applyTimelineDiff(base, { tag: "Insert", inner: { index: 3, value: "z" } })).toEqual([
+      "a",
+      "b",
+      "c",
+      "z",
+    ]);
+  });
+
+  test("replaces at an index", () => {
+    expect(applyTimelineDiff(base, { tag: "Set", inner: { index: 1, value: "z" } })).toEqual(["a", "z", "c"]);
+  });
+
+  test("removes at an index", () => {
+    expect(applyTimelineDiff(base, { tag: "Remove", inner: { index: 0 } })).toEqual(["b", "c"]);
+  });
+
+  test("truncates to a length", () => {
+    expect(applyTimelineDiff(base, { tag: "Truncate", inner: { length: 1 } })).toEqual(["a"]);
+    expect(applyTimelineDiff(base, { tag: "Truncate", inner: { length: 9 } })).toEqual(base);
+  });
+
+  test("an out of range index leaves the list untouched", () => {
+    expect(applyTimelineDiff(base, { tag: "Set", inner: { index: 9, value: "z" } })).toEqual(base);
+    expect(applyTimelineDiff(base, { tag: "Remove", inner: { index: -1 } })).toEqual(base);
+    expect(applyTimelineDiff(base, { tag: "Insert", inner: { index: 9, value: "z" } })).toEqual(base);
+  });
+
+  test("an unknown tag leaves the list untouched", () => {
+    expect(applyTimelineDiff(base, { tag: "Something" })).toEqual(base);
+  });
+
+  test("never mutates the list it was given", () => {
+    const items = ["a", "b"];
+    applyTimelineDiff(items, { tag: "PushBack", inner: { value: "c" } });
+    expect(items).toEqual(["a", "b"]);
+  });
+});
+
+describe("chatItemsOf", () => {
+  test("carries sender identity and the resolved display name", () => {
+    expect(chatItemsOf([entry({ id: "1" })], ME)).toEqual([
       { kind: "dayMarker", id: "day:2026-08-20", timestamp: at(20, 9) },
       {
         kind: "text",
-        id: "$1",
+        id: "1",
         senderId: RUI,
         senderName: "Rui",
         body: "bom dia",
@@ -188,202 +261,194 @@ describe("toChatItems", () => {
   });
 
   test("flags my own messages", () => {
-    const items = messages(toChatItems([textEvent("$1", ME, at(20, 9), "ola")], ME, nameOf));
+    const items = messages(chatItemsOf([entry({ id: "1", senderId: ME })], ME));
     expect(items[0]).toMatchObject({ mine: true, delivery: "sent", failed: false });
   });
 
   test("marks as read every message up to the newest receipt of another user", () => {
-    const events = [
-      textEvent("$1", ME, at(20, 9), "bom dia"),
-      textEvent("$2", RUI, at(20, 10), "bom dia"),
-      textEvent("$3", ME, at(20, 11), "ja comi"),
+    const entries = [
+      entry({ id: "1", senderId: ME }),
+      entry({ id: "2", timestamp: at(20, 10), readByOthers: true }),
+      entry({ id: "3", senderId: ME, timestamp: at(20, 11) }),
     ];
-    const read = readUpTo(["$1", "$2", "$3"], ["$2"]);
-    const items = messages(toChatItems(events, ME, nameOf, read));
+    const items = messages(chatItemsOf(entries, ME, readSetOf(entries)));
     expect(items.map((item) => item.delivery)).toEqual(["read", "read", "sent"]);
   });
 
-  test("flags local echoes as pending and rejected ones as failed", () => {
-    const sending = textEvent("$1", ME, at(20, 9), "a caminho");
-    sending.setStatus(EventStatus.SENDING);
-    const queued = textEvent("$2", ME, at(20, 10), "na fila");
-    queued.setStatus(EventStatus.QUEUED);
-    const encrypting = textEvent("$3", ME, at(20, 11), "a cifrar");
-    encrypting.setStatus(EventStatus.ENCRYPTING);
-    const failed = textEvent("$4", ME, at(20, 12), "falhou");
-    failed.setStatus(EventStatus.NOT_SENT);
-    const sent = textEvent("$5", ME, at(20, 13), "entregue");
-    sent.setStatus(EventStatus.SENT);
-
-    const items = messages(toChatItems([sending, queued, encrypting, failed, sent], ME, nameOf));
+  test("flags queued messages as pending and rejected ones as failed", () => {
+    const entries = [
+      entry({ id: "1", senderId: ME, sendState: "pending" }),
+      entry({ id: "2", senderId: ME, sendState: "failed", timestamp: at(20, 10) }),
+      entry({ id: "3", senderId: ME, timestamp: at(20, 11) }),
+    ];
+    const items = messages(chatItemsOf(entries, ME));
     expect(items.map((item) => ({ delivery: item.delivery, failed: item.failed }))).toEqual([
-      { delivery: "pending", failed: false },
-      { delivery: "pending", failed: false },
       { delivery: "pending", failed: false },
       { delivery: "sent", failed: true },
       { delivery: "sent", failed: false },
     ]);
   });
 
-  test("a receipt never overrides a still pending local echo", () => {
-    const pending = textEvent("$1", ME, at(20, 9), "a caminho");
-    pending.setStatus(EventStatus.SENDING);
-    const items = messages(toChatItems([pending], ME, nameOf, readUpTo(["$1"], ["$1"])));
+  test("a receipt never overrides a message still on its way out", () => {
+    const entries = [entry({ id: "1", senderId: ME, sendState: "pending", readByOthers: true })];
+    const items = messages(chatItemsOf(entries, ME, readSetOf(entries)));
     expect(items[0]).toMatchObject({ delivery: "pending" });
   });
 
-  test("drops redacted, edit and reaction events from the list", () => {
-    const edit = eventOf("$edit", RUI, at(20, 10), {
-      msgtype: "m.text",
-      body: "* bom dia",
-      "m.new_content": { msgtype: "m.text", body: "bom dia" },
-      "m.relates_to": { rel_type: "m.replace", event_id: "$1" },
-    });
-    const original = textEvent("$1", RUI, at(20, 9), "bom dai");
-    original.makeReplaced(edit);
-    const redacted = eventOf(
-      "$2",
-      RUI,
-      at(20, 11),
-      { msgtype: "m.text", body: "apagado" },
-      { redacted: true },
-    );
-    const reaction = eventOf(
-      "$reaction",
-      RUI,
-      at(20, 12),
-      { "m.relates_to": { rel_type: "m.annotation", event_id: "$1", key: "love" } },
-      { type: "m.reaction" },
-    );
-
-    const items = messages(toChatItems([original, edit, redacted, reaction], ME, nameOf));
-    expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ id: "$1", kind: "text", body: "bom dia" });
-  });
-
   test("one day marker per calendar day, none within a day", () => {
-    const items = toChatItems(
+    const items = chatItemsOf(
       [
-        textEvent("$1", RUI, at(20, 9), "bom dia"),
-        textEvent("$2", ME, at(20, 21), "boa noite"),
-        textEvent("$3", RUI, at(21, 8), "ola"),
+        entry({ id: "1" }),
+        entry({ id: "2", senderId: ME, timestamp: at(20, 21) }),
+        entry({ id: "3", timestamp: at(21, 8) }),
       ],
       ME,
-      nameOf,
     );
-    expect(items.map((item) => item.id)).toEqual(["day:2026-08-20", "$1", "$2", "day:2026-08-21", "$3"]);
+    expect(items.map((item) => item.id)).toEqual(["day:2026-08-20", "1", "2", "day:2026-08-21", "3"]);
   });
 
   test("a day marker uses the local date of the first message of the day", () => {
     const justBeforeMidnight = new Date(2026, 7, 20, 23, 59, 0).getTime();
-    const items = toChatItems([textEvent("$1", RUI, justBeforeMidnight, "quase amanha")], ME, nameOf);
+    const items = chatItemsOf([entry({ id: "1", timestamp: justBeforeMidnight })], ME);
     expect(items[0]).toEqual({ kind: "dayMarker", id: "day:2026-08-20", timestamp: justBeforeMidnight });
     expect(localDayKey(justBeforeMidnight)).toBe("2026-08-20");
   });
 
-  test("orders items chronologically whatever the input order", () => {
-    const items = toChatItems(
-      [
-        textEvent("$3", RUI, at(21, 8), "ola"),
-        textEvent("$1", RUI, at(20, 9), "bom dia"),
-        textEvent("$2", ME, at(20, 21), "boa noite"),
-      ],
-      ME,
-      nameOf,
-    );
-    expect(items.map((item) => item.id)).toEqual(["day:2026-08-20", "$1", "$2", "day:2026-08-21", "$3"]);
-    expect(items.map((item) => item.timestamp)).toEqual([
-      at(20, 9),
-      at(20, 9),
-      at(20, 21),
-      at(21, 8),
-      at(21, 8),
-    ]);
+  test("keeps text and image side by side in one list", () => {
+    const image = entry({
+      id: "2",
+      timestamp: at(20, 10),
+      message: {
+        kind: "image",
+        mxc: MXC,
+        width: 800,
+        height: 600,
+        blurhash: "LEHV6nWB2yk8",
+        caption: "a praia hoje",
+      },
+    });
+    const items = messages(chatItemsOf([entry({ id: "1" }), image], ME));
+    expect(items.map((item) => item.kind)).toEqual(["text", "image"]);
+    expect(items[1]).toMatchObject({ mxc: MXC, width: 800, caption: "a praia hoje", senderName: "Rui" });
   });
 
-  test("keeps text and image side by side in one list", () => {
-    const image = eventOf("$2", RUI, at(20, 10), {
-      msgtype: "m.image",
-      body: "a praia hoje",
-      filename: "praia.jpg",
-      url: "mxc://kazimo.test/praia",
-      info: { w: 800, h: 600, "xyz.amorgan.blurhash": "LEHV6nWB2yk8" },
-    });
-    const items = messages(toChatItems([textEvent("$1", RUI, at(20, 9), "bom dia"), image], ME, nameOf));
-    expect(items.map((item) => item.kind)).toEqual(["text", "image"]);
-    expect(items[1]).toMatchObject({
-      mxc: "mxc://kazimo.test/praia",
-      width: 800,
-      height: 600,
-      blurhash: "LEHV6nWB2yk8",
-      caption: "a praia hoje",
-      senderName: "Rui",
-    });
+  test("keeps the order the timeline gave it", () => {
+    const items = messages(
+      chatItemsOf([entry({ id: "3", timestamp: at(21, 8) }), entry({ id: "1" }), entry({ id: "2" })], ME),
+    );
+    expect(items.map((item) => item.id)).toEqual(["3", "1", "2"]);
+  });
+});
+
+describe("latestMessageOf", () => {
+  test("finds the last real message, skipping day markers", () => {
+    const items = chatItemsOf([entry({ id: "1" }), entry({ id: "2", timestamp: at(21, 8) })], ME);
+    expect(latestMessageOf(items)).toMatchObject({ id: "2" });
+  });
+
+  test("an empty list has no latest message", () => {
+    expect(latestMessageOf([])).toBe(null);
   });
 });
 
 describe("readUpTo", () => {
   test("everything before the newest receipt is read, nothing after it", () => {
-    expect([...readUpTo(["$1", "$2", "$3", "$4"], ["$1", "$3"])]).toEqual(["$1", "$2", "$3"]);
+    expect([...readUpTo(["1", "2", "3", "4"], ["1", "3"])]).toEqual(["1", "2", "3"]);
   });
 
   test("no receipt means nothing is read", () => {
-    expect([...readUpTo(["$1", "$2"], [])]).toEqual([]);
+    expect([...readUpTo(["1", "2"], [])]).toEqual([]);
   });
 
-  test("a receipt on an event outside the window is ignored", () => {
-    expect([...readUpTo(["$1", "$2"], ["$older"])]).toEqual([]);
+  test("a receipt on an item outside the window is ignored", () => {
+    expect([...readUpTo(["1", "2"], ["older"])]).toEqual([]);
   });
 
   test("an empty timeline yields an empty set", () => {
-    expect([...readUpTo([], ["$1"])]).toEqual([]);
+    expect([...readUpTo([], ["1"])]).toEqual([]);
   });
 });
 
-describe("typingNames", () => {
-  const member = (userId: string, name: string, typing: boolean) => ({ userId, name, typing });
+describe("sendStateOf", () => {
+  test("maps the send state of a local echo", () => {
+    expect(sendStateOf({ tag: "NotSentYet", inner: { progress: undefined } })).toBe("pending");
+    expect(sendStateOf({ tag: "SendingFailed", inner: { isRecoverable: true } })).toBe("failed");
+    expect(sendStateOf({ tag: "Sent", inner: { eventId: "$1" } })).toBe("sent");
+  });
+
+  test("a remote event has no send state and counts as sent", () => {
+    expect(sendStateOf(undefined)).toBe("sent");
+  });
+});
+
+describe("senderNameOf", () => {
+  test("prefers the display name of a ready profile", () => {
+    const profile = { tag: "Ready", inner: { displayName: "Rui", displayNameAmbiguous: false } };
+    expect(senderNameOf(RUI, profile)).toBe("Rui");
+  });
+
+  test("falls back to the localpart when the profile is not there yet", () => {
+    expect(senderNameOf(RUI, { tag: "Pending" })).toBe("rui");
+    expect(senderNameOf(RUI, { tag: "Ready", inner: { displayName: undefined } })).toBe("rui");
+    expect(localpartOf("@rui:kazimo.test")).toBe("rui");
+    expect(localpartOf("rui")).toBe("rui");
+  });
+});
+
+describe("receiptUserIdsOf", () => {
+  test("reads the user ids of a receipt map", () => {
+    expect(receiptUserIdsOf(new Map([[RUI, { timestamp: 1n }]]))).toEqual([RUI]);
+  });
+
+  test("reads them from a plain record too", () => {
+    expect(receiptUserIdsOf({ [RUI]: {} })).toEqual([RUI]);
+  });
+
+  test("no receipt at all yields nothing", () => {
+    expect(receiptUserIdsOf(undefined)).toEqual([]);
+  });
+});
+
+describe("typingNamesOf", () => {
+  const nameOf = (userId: string) => (userId === RUI ? "Rui" : "Ana");
 
   test("keeps the names of the others who are typing", () => {
-    expect(typingNames([member(RUI, "Rui", true), member("@ana:kazimo.test", "Ana", false)], ME)).toEqual([
-      "Rui",
-    ]);
+    expect(typingNamesOf([RUI, "@ana:kazimo.test"], ME, nameOf)).toEqual(["Rui", "Ana"]);
   });
 
   test("never reports myself", () => {
-    expect(typingNames([member(ME, "Avo", true)], ME)).toEqual([]);
+    expect(typingNamesOf([ME, RUI], ME, nameOf)).toEqual(["Rui"]);
   });
 });
 
-describe("sendText", () => {
-  test("delegates to the client without a thread id", async () => {
-    const calls: Array<[string, string]> = [];
-    const client = {
-      sendTextMessage: async (roomId: string, body: string) => {
-        calls.push([roomId, body]);
-        return { event_id: "$sent" };
-      },
-    } as unknown as MatrixClient;
+describe("imageInfoOf", () => {
+  test("describes the photo with its dimensions and blurhash", () => {
+    expect(
+      imageInfoOf({ uri: "file:///a.jpg", width: 2048, height: 1536, size: 4096, blurhash: "LEHV6" }),
+    ).toEqual({
+      width: 2048n,
+      height: 1536n,
+      size: 4096n,
+      mimetype: "image/jpeg",
+      blurhash: "LEHV6",
+    });
+  });
 
-    await expect(sendText(client, ROOM_ID, "bom dia")).resolves.toEqual({ event_id: "$sent" });
-    expect(calls).toEqual([[ROOM_ID, "bom dia"]]);
+  test("leaves the blurhash out when there is none", () => {
+    const info = imageInfoOf({
+      uri: "file:///a.jpg",
+      width: 10,
+      height: 10,
+      size: 12,
+      blurhash: null,
+    });
+    expect(info.blurhash).toBe(undefined);
   });
 });
 
-describe("setTyping", () => {
-  test("stopping typing expires the notification immediately", async () => {
-    const calls: Array<[string, boolean, number]> = [];
-    const client = {
-      sendTyping: async (roomId: string, typing: boolean, timeoutMs: number) => {
-        calls.push([roomId, typing, timeoutMs]);
-        return {};
-      },
-    } as unknown as MatrixClient;
-
-    await setTyping(client, ROOM_ID, true);
-    await setTyping(client, ROOM_ID, false);
-    expect(calls).toEqual([
-      [ROOM_ID, true, 8000],
-      [ROOM_ID, false, 0],
-    ]);
+describe("uploadPathOf", () => {
+  test("the rust sdk wants a system path, not a file uri", () => {
+    expect(uploadPathOf("file:///var/photo.jpg")).toBe("/var/photo.jpg");
+    expect(uploadPathOf("/var/photo.jpg")).toBe("/var/photo.jpg");
   });
 });

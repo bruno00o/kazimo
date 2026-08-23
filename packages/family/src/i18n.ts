@@ -24,6 +24,16 @@ export interface Strings {
   welcome: string;
   welcomeBody: string;
   photoFull: string;
+  securityTitle: string;
+  securityBody: string;
+  securityKeyHint: string;
+  securityContinue: string;
+  securityEnterTitle: string;
+  securityEnterBody: string;
+  securityEnterPlaceholder: string;
+  securityEnterAction: string;
+  securityEnterFailed: string;
+  securityLater: string;
   audioCall: string;
   videoCall: string;
   markRead: string;
@@ -81,6 +91,16 @@ const en: Strings = {
   welcome: "Welcome to Kazimo",
   welcomeBody: "Sign in with your family account to see your conversations.",
   photoFull: "Photo",
+  securityTitle: "Your security key",
+  securityBody: "Keep this key somewhere safe. It unlocks your message history if you change phones.",
+  securityKeyHint: "12 groups of 4 characters",
+  securityContinue: "I saved it",
+  securityEnterTitle: "Unlock your messages",
+  securityEnterBody: "Enter your security key to read your encrypted conversations on this phone.",
+  securityEnterPlaceholder: "xxxx xxxx xxxx xxxx",
+  securityEnterAction: "Unlock",
+  securityEnterFailed: "This key does not match. Check it and try again.",
+  securityLater: "Later",
   audioCall: "Audio call",
   videoCall: "Video call",
   markRead: "Mark as read",
@@ -138,6 +158,18 @@ const fr: Strings = {
   welcome: "Bienvenue sur Kazimo",
   welcomeBody: "Connectez-vous avec votre compte famille pour voir vos conversations.",
   photoFull: "Photo",
+  securityTitle: "Votre clé de sécurité",
+  securityBody:
+    "Conservez cette clé en lieu sûr. Elle permet de retrouver vos messages si vous changez de téléphone.",
+  securityKeyHint: "12 groupes de 4 caractères",
+  securityContinue: "Je l'ai notée",
+  securityEnterTitle: "Déverrouiller vos messages",
+  securityEnterBody:
+    "Saisissez votre clé de sécurité pour lire vos conversations chiffrées sur ce téléphone.",
+  securityEnterPlaceholder: "xxxx xxxx xxxx xxxx",
+  securityEnterAction: "Déverrouiller",
+  securityEnterFailed: "Cette clé ne correspond pas. Vérifiez-la et réessayez.",
+  securityLater: "Plus tard",
   audioCall: "Appel audio",
   videoCall: "Appel vidéo",
   markRead: "Marquer comme lu",
@@ -195,6 +227,17 @@ const ptPT: Strings = {
   welcome: "Bem-vindo ao Kazimo",
   welcomeBody: "Inicia sessão com a tua conta da família para veres as tuas conversas.",
   photoFull: "Foto",
+  securityTitle: "A tua chave de segurança",
+  securityBody:
+    "Guarda esta chave num lugar seguro. Permite recuperar as tuas mensagens se mudares de telemóvel.",
+  securityKeyHint: "12 grupos de 4 caracteres",
+  securityContinue: "Já a guardei",
+  securityEnterTitle: "Desbloquear as tuas mensagens",
+  securityEnterBody: "Introduz a tua chave de segurança para leres as conversas cifradas neste telemóvel.",
+  securityEnterPlaceholder: "xxxx xxxx xxxx xxxx",
+  securityEnterAction: "Desbloquear",
+  securityEnterFailed: "Esta chave não corresponde. Verifica-a e tenta novamente.",
+  securityLater: "Mais tarde",
   audioCall: "Chamada de voz",
   videoCall: "Videochamada",
   markRead: "Marcar como lida",
@@ -252,6 +295,18 @@ const es: Strings = {
   welcome: "Bienvenido a Kazimo",
   welcomeBody: "Inicia sesión con tu cuenta familiar para ver tus conversaciones.",
   photoFull: "Foto",
+  securityTitle: "Tu clave de seguridad",
+  securityBody:
+    "Guarda esta clave en un lugar seguro. Permite recuperar tus mensajes si cambias de teléfono.",
+  securityKeyHint: "12 grupos de 4 caracteres",
+  securityContinue: "Ya la guardé",
+  securityEnterTitle: "Desbloquear tus mensajes",
+  securityEnterBody:
+    "Introduce tu clave de seguridad para leer tus conversaciones cifradas en este teléfono.",
+  securityEnterPlaceholder: "xxxx xxxx xxxx xxxx",
+  securityEnterAction: "Desbloquear",
+  securityEnterFailed: "Esta clave no coincide. Compruébala e inténtalo de nuevo.",
+  securityLater: "Más tarde",
   audioCall: "Llamada de voz",
   videoCall: "Videollamada",
   markRead: "Marcar como leída",
