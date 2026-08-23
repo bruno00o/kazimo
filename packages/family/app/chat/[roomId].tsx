@@ -279,49 +279,40 @@ export default function ChatScreen() {
 
       {typingLabel !== null && <Text style={styles.typing}>{typingLabel}</Text>}
 
-      {conversation.encrypted ? (
-        <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
-          <View style={styles.notice}>
-            <Icon name="lock" color={tokens.theme.light.inkSoft} size={18} />
-            <Text style={styles.noticeText}>{t.encryptedUnavailable}</Text>
-          </View>
-        </View>
-      ) : (
-        <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t.attachPhoto}
-            style={[styles.attach, uploading && styles.sendDisabled]}
-            onPress={() => void attach()}
-            disabled={uploading || conversation.encrypted}
-          >
-            {uploading ? (
-              <ActivityIndicator color={tokens.color.blueDeep} />
-            ) : (
-              <Icon name="attach" color={tokens.color.blueDeep} size={20} />
-            )}
-          </Pressable>
-          <TextInput
-            style={styles.input}
-            value={draft}
-            onChangeText={edit}
-            placeholder={t.messagePlaceholder}
-            placeholderTextColor={tokens.theme.light.inkFaint}
-            multiline
-            onSubmitEditing={submit}
-            blurOnSubmit={false}
-          />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t.send}
-            style={[styles.send, !draft.trim() && styles.sendDisabled]}
-            onPress={submit}
-            disabled={!draft.trim()}
-          >
-            <Icon name="send" color="#ffffff" size={20} />
-          </Pressable>
-        </View>
-      )}
+      <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t.attachPhoto}
+          style={[styles.attach, uploading && styles.sendDisabled]}
+          onPress={() => void attach()}
+          disabled={uploading}
+        >
+          {uploading ? (
+            <ActivityIndicator color={tokens.color.blueDeep} />
+          ) : (
+            <Icon name="attach" color={tokens.color.blueDeep} size={20} />
+          )}
+        </Pressable>
+        <TextInput
+          style={styles.input}
+          value={draft}
+          onChangeText={edit}
+          placeholder={t.messagePlaceholder}
+          placeholderTextColor={tokens.theme.light.inkFaint}
+          multiline
+          onSubmitEditing={submit}
+          blurOnSubmit={false}
+        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t.send}
+          style={[styles.send, !draft.trim() && styles.sendDisabled]}
+          onPress={submit}
+          disabled={!draft.trim()}
+        >
+          <Icon name="send" color="#ffffff" size={20} />
+        </Pressable>
+      </View>
 
       <Modal
         visible={viewed !== null}
@@ -590,19 +581,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingBottom: 4,
     fontSize: 13,
-    color: tokens.theme.light.inkSoft,
-  },
-  notice: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 4,
-    paddingVertical: 8,
-  },
-  noticeText: {
-    flex: 1,
-    fontSize: 14,
     color: tokens.theme.light.inkSoft,
   },
   composer: {

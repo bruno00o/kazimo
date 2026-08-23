@@ -13,9 +13,19 @@ import {
   type StoredSession,
 } from "./auth";
 import { type CallCenter, startCallCenter } from "./calls";
+import {
+  assessSecurity,
+  backupExistsOnServerRaw,
+  clearSecurityDone,
+  isSecurityDone,
+  markSecurityDone,
+  SECURITY_READY,
+  type Security,
+} from "./e2ee";
 import { readEnv } from "./env";
 import { appStrings } from "./i18n";
 import { type MatrixHandle, startMatrix } from "./matrix";
+import { SecurityGate } from "./SecurityGate";
 import { acceptInvites, endSession, type Identity, whoami } from "./session";
 
 const t = appStrings();
@@ -54,7 +64,7 @@ type Phase =
   | { kind: "loading" }
   | { kind: "signedOut" }
   | { kind: "connecting"; credentials: Credentials }
-  | { kind: "ready"; connected: Connected }
+  | { kind: "ready"; connected: Connected; security: Security }
   | { kind: "error"; message: string };
 
 const credentialsOf = (stored: StoredSession | null): Credentials | null => {
@@ -65,6 +75,7 @@ const credentialsOf = (stored: StoredSession | null): Credentials | null => {
 
 const open = async (homeserver: string, token: string, stored: StoredSession | null): Promise<Connected> => {
   const identity = await whoami(homeserver, token);
+  const backupOnServer = await backupExistsOnServerRaw(homeserver, token).catch(() => true);
   const handle = await startMatrix(
     {
       homeserver,
@@ -73,7 +84,7 @@ const open = async (homeserver: string, token: string, stored: StoredSession | n
       userId: identity.userId,
       deviceId: identity.deviceId || (stored?.deviceId ?? ""),
     },
-    { bootstrapIdentity: false },
+    { bootstrapIdentity: !backupOnServer },
   );
   await acceptInvites(handle.client).catch(() => undefined);
   return { handle, homeserver, identity, stored };
@@ -94,6 +105,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   const [center, setCenter] = useState<CallCenter | null>(null);
+  const [securityDismissed, setSecurityDismissed] = useState(false);
   const dismissers = useRef(new Map<string, () => void>());
   const latestStored = useRef<StoredSession | null>(null);
 
@@ -102,6 +114,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => {
       if (dismissers.current.get(roomId) === dismiss) dismissers.current.delete(roomId);
     };
+  }, []);
+
+  const finishSecurity = useCallback((completed: boolean) => {
+    if (completed) void markSecurityDone().catch(() => undefined);
+    setSecurityDismissed(true);
   }, []);
 
   useEffect(() => {
@@ -130,8 +147,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           await endSession(connected.handle).catch(() => undefined);
           return;
         }
+        const alreadyDone = await isSecurityDone().catch(() => false);
+        const security = alreadyDone
+          ? SECURITY_READY
+          : await assessSecurity(connected.handle.client).catch(() => SECURITY_READY);
+        if (cancelled) {
+          await endSession(connected.handle).catch(() => undefined);
+          return;
+        }
         latestStored.current = connected.stored;
-        setPhase({ kind: "ready", connected });
+        setPhase({ kind: "ready", connected, security });
       } catch (error) {
         if (cancelled) return;
         if (error instanceof Error && error.name === LOGOUT_ERROR_NAME) {
@@ -155,6 +180,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const stored = latestStored.current;
     latestStored.current = null;
     if (stored) await revokeAndForget(stored).catch(() => undefined);
+    await clearSecurityDone().catch(() => undefined);
+    setSecurityDismissed(false);
     setPhase({ kind: "signedOut" });
   }, [handle]);
 
@@ -194,6 +221,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     );
   }
   if (phase.kind === "error") return <Status label={phase.message} tone="error" />;
+  if (phase.security.state !== "ready" && !securityDismissed) {
+    return (
+      <SecurityGate client={phase.connected.handle.client} prompt={phase.security} onDone={finishSecurity} />
+    );
+  }
 
   return (
     <SessionContext.Provider
