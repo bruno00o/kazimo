@@ -1,11 +1,15 @@
 import { tokens } from "@kazimo/shared";
 import { StatusBar } from "expo-status-bar";
 import type { MatrixClient } from "matrix-js-sdk";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { CallView } from "./src/CallView";
+import { type CallCenter, startCallCenter } from "./src/calls";
 import { readEnv } from "./src/env";
+import { appStrings } from "./src/i18n";
 import { type Identity, type RoomSummary, roomSummaries, startSession, whoami } from "./src/session";
+
+const t = appStrings();
 
 type Call = { roomId: string; title: string };
 
@@ -18,6 +22,34 @@ type Phase =
 export default function App() {
   const [phase, setPhase] = useState<Phase>({ kind: "connecting" });
   const [call, setCall] = useState<Call | null>(null);
+  const center = useRef<CallCenter | null>(null);
+  const readyClient = phase.kind === "ready" ? phase.client : null;
+
+  useEffect(() => {
+    if (!readyClient) return;
+    let stopped: CallCenter | null = null;
+    let cancelled = false;
+    void startCallCenter(
+      readyClient,
+      {
+        onAnswer: (incoming) => setCall({ roomId: incoming.roomId, title: incoming.title }),
+        onRemoteEnd: () => setCall(null),
+      },
+      t,
+    ).then((started) => {
+      if (cancelled) {
+        started.stop();
+        return;
+      }
+      stopped = started;
+      center.current = started;
+    });
+    return () => {
+      cancelled = true;
+      stopped?.stop();
+      center.current = null;
+    };
+  }, [readyClient]);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,7 +92,11 @@ export default function App() {
           homeserver={phase.homeserver}
           roomId={call.roomId}
           title={call.title}
-          onLeave={() => setCall(null)}
+          strings={t}
+          onLeave={() => {
+            center.current?.hangup(call.roomId);
+            setCall(null);
+          }}
         />
         <StatusBar style="light" />
       </View>
@@ -70,7 +106,7 @@ export default function App() {
   return (
     <View style={styles.screen}>
       <Text style={styles.brand}>Kazimo</Text>
-      {phase.kind === "connecting" && <Status label="a sincronizar" spinner />}
+      {phase.kind === "connecting" && <Status label={t.syncing} spinner />}
       {phase.kind === "config" && <ConfigHint />}
       {phase.kind === "error" && <Status label={phase.message} tone="error" />}
       {phase.kind === "ready" && (
@@ -97,7 +133,7 @@ function Status({ label, spinner, tone }: { label: string; spinner?: boolean; to
 function ConfigHint() {
   return (
     <View style={styles.status}>
-      <Text style={styles.statusText}>Falta o token.</Text>
+      <Text style={styles.statusText}>{t.tokenMissing}</Text>
       <Text style={styles.hint}>packages/family/.env.local</Text>
       <Text style={styles.hint}>EXPO_PUBLIC_MATRIX_TOKEN=...</Text>
     </View>
@@ -116,7 +152,7 @@ function Ready({
   return (
     <View style={styles.ready}>
       <Text style={styles.userId}>{identity.userId}</Text>
-      <Text style={styles.count}>{`${rooms.length} salas`}</Text>
+      <Text style={styles.count}>{`${rooms.length} ${t.rooms}`}</Text>
       <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
         {rooms.map((room) => (
           <Pressable key={room.id} style={styles.row} onPress={() => onCall(room)}>

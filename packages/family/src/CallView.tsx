@@ -15,28 +15,31 @@ import {
   sfuClaims,
   sfuToken,
 } from "./call";
+import type { Strings } from "./i18n";
 
 type Load = { kind: "loading" } | { kind: "ready"; token: SfuToken } | { kind: "error"; message: string };
 
-const stateLabel: Record<ConnectionState, string> = {
-  [ConnectionState.Disconnected]: "desligado",
-  [ConnectionState.Connecting]: "a ligar",
-  [ConnectionState.Connected]: "ligado",
-  [ConnectionState.Reconnecting]: "a reconectar",
-  [ConnectionState.SignalReconnecting]: "a reconectar",
-};
+const stateLabel = (strings: Strings): Record<ConnectionState, string> => ({
+  [ConnectionState.Disconnected]: strings.stateDisconnected,
+  [ConnectionState.Connecting]: strings.stateConnecting,
+  [ConnectionState.Connected]: strings.stateConnected,
+  [ConnectionState.Reconnecting]: strings.stateReconnecting,
+  [ConnectionState.SignalReconnecting]: strings.stateReconnecting,
+});
 
 export function CallView({
   client,
   homeserver,
   roomId,
   title,
+  strings,
   onLeave,
 }: {
   client: MatrixClient;
   homeserver: string;
   roomId: string;
   title: string;
+  strings: Strings;
   onLeave: () => void;
 }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
@@ -72,8 +75,8 @@ export function CallView({
     return (
       <View style={styles.center}>
         <ActivityIndicator color={tokens.color.blueSoft} />
-        <Text style={styles.note}>a preparar a chamada</Text>
-        <Leave onLeave={onLeave} />
+        <Text style={styles.note}>{strings.preparingCall}</Text>
+        <Leave label={strings.hangUp} onLeave={onLeave} />
       </View>
     );
   }
@@ -82,19 +85,29 @@ export function CallView({
     return (
       <View style={styles.center}>
         <Text style={styles.error}>{load.message}</Text>
-        <Leave onLeave={onLeave} />
+        <Leave label={strings.hangUp} onLeave={onLeave} />
       </View>
     );
   }
 
   return (
     <LiveKitRoom serverUrl={load.token.url} token={load.token.jwt} connect audio video>
-      <Stage title={title} claims={sfuClaims(load.token.jwt)} onLeave={onLeave} />
+      <Stage title={title} claims={sfuClaims(load.token.jwt)} strings={strings} onLeave={onLeave} />
     </LiveKitRoom>
   );
 }
 
-function Stage({ title, claims, onLeave }: { title: string; claims: SfuClaims | null; onLeave: () => void }) {
+function Stage({
+  title,
+  claims,
+  strings,
+  onLeave,
+}: {
+  title: string;
+  claims: SfuClaims | null;
+  strings: Strings;
+  onLeave: () => void;
+}) {
   const state = useConnectionState();
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const remote = tracks.filter((track) => !track.participant.isLocal);
@@ -109,23 +122,23 @@ function Stage({ title, claims, onLeave }: { title: string; claims: SfuClaims | 
             style={styles.tile}
           />
         ))}
-        {tracks.length === 0 && <Text style={styles.placeholder}>à espera de vídeo</Text>}
+        {tracks.length === 0 && <Text style={styles.placeholder}>{strings.waitingVideo}</Text>}
       </View>
       <View style={styles.hud}>
-        <Text style={styles.state}>{stateLabel[state]}</Text>
+        <Text style={styles.state}>{stateLabel(strings)[state]}</Text>
         <Text style={styles.meta}>{title}</Text>
-        <Text style={styles.meta}>{`${remote.length} remotos`}</Text>
+        <Text style={styles.meta}>{`${remote.length} ${strings.remotes}`}</Text>
         {claims && <Text style={styles.meta}>{`sfu ${claims.room}`}</Text>}
       </View>
-      <Leave onLeave={onLeave} />
+      <Leave label={strings.hangUp} onLeave={onLeave} />
     </View>
   );
 }
 
-function Leave({ onLeave }: { onLeave: () => void }) {
+function Leave({ label, onLeave }: { label: string; onLeave: () => void }) {
   return (
     <Pressable style={styles.leave} onPress={onLeave}>
-      <Text style={styles.leaveText}>Terminar</Text>
+      <Text style={styles.leaveText}>{label}</Text>
     </Pressable>
   );
 }
