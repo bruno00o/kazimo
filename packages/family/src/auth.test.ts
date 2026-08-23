@@ -1,5 +1,4 @@
 import { describe, expect, mock, test } from "bun:test";
-import { TokenRefreshLogoutError } from "matrix-js-sdk";
 import type { SecretStore, StoredSession } from "./auth";
 
 class FakeTokenError extends Error {}
@@ -54,18 +53,21 @@ mock.module("expo-secure-store", () => ({
 }));
 
 const {
-  accessTokensOf,
   authMetadataOf,
   deviceIdFrom,
   discoveryDocumentOf,
   expiresAtOf,
   EXPIRY_MARGIN_MS,
+  generateScope,
   isExpiringSoon,
   normalizeHomeserver,
   REDIRECT_URI,
   refreshSession,
+  registerClient,
   scopesFor,
   sessionStoreOf,
+  TokenRefreshLogoutError,
+  validateAuthMetadata,
   withTokens,
 } = await import("./auth");
 
@@ -130,6 +132,31 @@ describe("auth metadata", () => {
     );
   });
 
+  test("rejects metadata without the authorization code response type", () => {
+    expect(() => authMetadataOf({ ...validMetadata, response_types_supported: ["id_token"] })).toThrow(
+      "auth metadata invalid",
+    );
+  });
+
+  test("rejects a non object payload", () => {
+    expect(validateAuthMetadata(null)).toBe(false);
+    expect(validateAuthMetadata("nope")).toBe(false);
+  });
+
+  test("rejects each missing endpoint", () => {
+    const required = [
+      "issuer",
+      "authorization_endpoint",
+      "token_endpoint",
+      "revocation_endpoint",
+      "registration_endpoint",
+    ] as const;
+    for (const key of required) {
+      const { [key]: _removed, ...incomplete } = validMetadata;
+      expect(validateAuthMetadata(incomplete)).toBe(false);
+    }
+  });
+
   test("maps to an expo discovery document", () => {
     expect(discoveryDocumentOf(authMetadataOf(validMetadata))).toEqual({
       authorizationEndpoint: `${ISSUER}authorize`,
@@ -141,6 +168,10 @@ describe("auth metadata", () => {
 });
 
 describe("scopes", () => {
+  test("matches the scope string the Matrix spec expects", () => {
+    expect(generateScope("ABCDEFGHIJ")).toBe("urn:matrix:client:api:* urn:matrix:client:device:ABCDEFGHIJ");
+  });
+
   test("requests the Matrix API and device scopes", () => {
     expect(scopesFor("ABCDEFGHIJ")).toEqual([
       "urn:matrix:client:api:*",
@@ -196,18 +227,72 @@ describe("token expiry", () => {
     expect(isExpiringSoon({ expiresAt: 100_000 + EXPIRY_MARGIN_MS - 1 }, 100_000)).toBe(true);
     expect(isExpiringSoon({ expiresAt: null }, 100_000)).toBe(false);
   });
+});
 
-  test("accessTokensOf matches the SDK shape", () => {
-    expect(accessTokensOf(sessionOf())).toEqual({
-      accessToken: "mat_old",
-      refreshToken: "mar_old",
-      expiry: new Date(1_000_000),
+describe("client registration", () => {
+  const originalFetch = globalThis.fetch;
+  const capture = (
+    responder: () => { ok: boolean; body: unknown },
+  ): { calls: { url: string; init: RequestInit }[] } => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      const { ok, body } = responder();
+      return { ok, json: async () => body };
+    }) as unknown as typeof fetch;
+    return { calls };
+  };
+
+  test("posts the native client metadata and keeps the client id", async () => {
+    const { calls } = capture(() => ({ ok: true, body: { client_id: "01CLIENT" } }));
+    try {
+      expect(await registerClient(authMetadataOf(validMetadata))).toBe("01CLIENT");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    const call = calls[0];
+    expect(call?.url).toBe(`${ISSUER}oauth2/registration`);
+    expect(call?.init.method).toBe("POST");
+    expect(JSON.parse(String(call?.init.body))).toEqual({
+      client_name: "Kazimo",
+      client_uri: "https://github.com/bruno00o/kazimo",
+      application_type: "native",
+      redirect_uris: ["kazimo://oidc/callback"],
+      response_types: ["code"],
+      grant_types: ["authorization_code", "refresh_token"],
+      token_endpoint_auth_method: "none",
     });
-    expect(accessTokensOf(sessionOf({ refreshToken: null, expiresAt: null }))).toEqual({
-      accessToken: "mat_old",
-      refreshToken: undefined,
-      expiry: undefined,
-    });
+  });
+
+  test("rejects a failed registration", async () => {
+    capture(() => ({ ok: false, body: {} }));
+    try {
+      await expect(registerClient(authMetadataOf(validMetadata))).rejects.toThrow(
+        "client registration failed",
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("rejects a response without a client id", async () => {
+    capture(() => ({ ok: true, body: { client: "01CLIENT" } }));
+    try {
+      await expect(registerClient(authMetadataOf(validMetadata))).rejects.toThrow(
+        "client registration invalid",
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe("TokenRefreshLogoutError", () => {
+  test("keeps the name the session context matches on", () => {
+    const error = new TokenRefreshLogoutError(new Error("invalid_grant"));
+    expect(error.name).toBe("TokenRefreshLogoutError");
+    expect(error.message).toBe("invalid_grant");
+    expect(new TokenRefreshLogoutError().message).toBe("");
   });
 });
 

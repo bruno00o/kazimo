@@ -13,17 +13,23 @@ import {
 } from "expo-auth-session";
 import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
-import {
-  type AccessTokens,
-  generateScope,
-  isValidAuthMetadata,
-  OAuth2,
-  type TokenRefreshFunction,
-  TokenRefreshLogoutError,
-  type ValidatedAuthMetadata,
-} from "matrix-js-sdk";
 import { readOidcClientId } from "./env";
 import { whoami } from "./session";
+
+export type AuthMetadata = {
+  issuer: string;
+  authorization_endpoint: string;
+  token_endpoint: string;
+  revocation_endpoint: string;
+  registration_endpoint: string;
+};
+
+export class TokenRefreshLogoutError extends Error {
+  constructor(cause?: Error) {
+    super(cause?.message ?? "");
+    this.name = "TokenRefreshLogoutError";
+  }
+}
 
 export type StoredSession = {
   homeserver: string;
@@ -64,8 +70,17 @@ export const REDIRECT_URI = makeRedirectUri({
   path: REDIRECT_PATH,
 });
 
-const CLIENT_NAME = "Kazimo";
-const CLIENT_URI = "https://github.com/bruno00o/kazimo";
+const CLIENT_METADATA = {
+  client_name: "Kazimo",
+  client_uri: "https://github.com/bruno00o/kazimo",
+  application_type: "native",
+  redirect_uris: [REDIRECT_URI],
+  response_types: ["code"],
+  grant_types: ["authorization_code", "refresh_token"],
+  token_endpoint_auth_method: "none",
+};
+const MATRIX_API_SCOPE = "urn:matrix:client:api:*";
+const MATRIX_DEVICE_SCOPE_PREFIX = "urn:matrix:client:device:";
 const SESSION_KEY = "kazimo.session";
 const DEVICE_ID_KEY = "kazimo.device";
 const CLIENT_ID_KEY_PREFIX = "kazimo.oauth.client.";
@@ -87,17 +102,44 @@ export const normalizeHomeserver = (input: string): string => {
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 };
 
-export const authMetadataOf = (json: unknown): ValidatedAuthMetadata => {
-  if (!isValidAuthMetadata(json)) throw new Error("auth metadata invalid");
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const hasString = (record: Record<string, unknown>, key: string): boolean => typeof record[key] === "string";
+
+const listIncludes = (record: Record<string, unknown>, key: string, value: string): boolean => {
+  const list = record[key];
+  return Array.isArray(list) && list.includes(value);
+};
+
+const REQUIRED_METADATA_STRINGS = [
+  "issuer",
+  "authorization_endpoint",
+  "token_endpoint",
+  "revocation_endpoint",
+  "registration_endpoint",
+];
+
+export const validateAuthMetadata = (value: unknown): value is AuthMetadata =>
+  isRecord(value) &&
+  REQUIRED_METADATA_STRINGS.every((key) => hasString(value, key)) &&
+  listIncludes(value, "response_types_supported", "code") &&
+  listIncludes(value, "code_challenge_methods_supported", "S256");
+
+export const authMetadataOf = (json: unknown): AuthMetadata => {
+  if (!validateAuthMetadata(json)) throw new Error("auth metadata invalid");
   return json;
 };
 
-export const discoveryDocumentOf = (metadata: ValidatedAuthMetadata): DiscoveryDocument => ({
+export const discoveryDocumentOf = (metadata: AuthMetadata): DiscoveryDocument => ({
   authorizationEndpoint: metadata.authorization_endpoint,
   tokenEndpoint: metadata.token_endpoint,
   revocationEndpoint: metadata.revocation_endpoint,
   registrationEndpoint: metadata.registration_endpoint,
 });
+
+export const generateScope = (deviceId: string): string =>
+  `${MATRIX_API_SCOPE} ${MATRIX_DEVICE_SCOPE_PREFIX}${deviceId}`;
 
 export const scopesFor = (deviceId: string): string[] => generateScope(deviceId).split(" ");
 
@@ -139,15 +181,8 @@ export const withTokens = (
 export const isExpiringSoon = (session: Pick<StoredSession, "expiresAt">, nowMs: number): boolean =>
   session.expiresAt !== null && session.expiresAt - nowMs < EXPIRY_MARGIN_MS;
 
-export const accessTokensOf = (session: StoredSession): AccessTokens => ({
-  accessToken: session.accessToken,
-  refreshToken: session.refreshToken ?? undefined,
-  expiry: session.expiresAt === null ? undefined : new Date(session.expiresAt),
-});
-
 const isStoredSession = (value: unknown): value is StoredSession => {
-  if (typeof value !== "object" || value === null) return false;
-  const record = value as Record<string, unknown>;
+  if (!isRecord(value)) return false;
   const strings = [
     "homeserver",
     "issuer",
@@ -158,9 +193,9 @@ const isStoredSession = (value: unknown): value is StoredSession => {
     "accessToken",
   ];
   return (
-    strings.every((key) => typeof record[key] === "string") &&
-    (record.refreshToken === null || typeof record.refreshToken === "string") &&
-    (record.expiresAt === null || typeof record.expiresAt === "number")
+    strings.every((key) => hasString(value, key)) &&
+    (value.refreshToken === null || typeof value.refreshToken === "string") &&
+    (value.expiresAt === null || typeof value.expiresAt === "number")
   );
 };
 
@@ -200,12 +235,11 @@ const fetchJson = async (url: string): Promise<unknown | null> => {
 };
 
 const issuerOf = (body: unknown): string | null => {
-  if (typeof body !== "object" || body === null) return null;
-  const issuer = (body as Record<string, unknown>).issuer;
-  return typeof issuer === "string" ? issuer : null;
+  if (!isRecord(body)) return null;
+  return typeof body.issuer === "string" ? body.issuer : null;
 };
 
-export const discoverAuth = async (homeserver: string): Promise<ValidatedAuthMetadata> => {
+export const discoverAuth = async (homeserver: string): Promise<AuthMetadata> => {
   for (const path of AUTH_METADATA_PATHS) {
     const metadata = await fetchJson(`${homeserver}${path}`);
     if (metadata) return authMetadataOf(metadata);
@@ -217,21 +251,27 @@ export const discoverAuth = async (homeserver: string): Promise<ValidatedAuthMet
   return authMetadataOf(configuration);
 };
 
-const ensureClientId = async (metadata: ValidatedAuthMetadata): Promise<string> => {
+export const registerClient = async (metadata: AuthMetadata): Promise<string> => {
+  const response = await fetch(metadata.registration_endpoint, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(CLIENT_METADATA),
+  });
+  if (!response.ok) throw new Error("client registration failed");
+  const body: unknown = await response.json();
+  if (!isRecord(body) || typeof body.client_id !== "string") {
+    throw new Error("client registration invalid");
+  }
+  return body.client_id;
+};
+
+const ensureClientId = async (metadata: AuthMetadata): Promise<string> => {
   const configured = readOidcClientId();
   if (configured) return configured;
   const key = `${CLIENT_ID_KEY_PREFIX}${metadata.issuer}`;
   const registered = await secureStore.get(key);
   if (registered) return registered;
-  const clientId = await OAuth2.registerClient(metadata, {
-    client_name: CLIENT_NAME,
-    client_uri: CLIENT_URI,
-    application_type: "native",
-    redirect_uris: [REDIRECT_URI],
-    response_types: ["code"],
-    grant_types: ["authorization_code", "refresh_token"],
-    token_endpoint_auth_method: "none",
-  });
+  const clientId = await registerClient(metadata);
   await secureStore.set(key, clientId);
   return clientId;
 };
@@ -303,18 +343,6 @@ export const refreshSession = async (session: StoredSession): Promise<StoredSess
     if (error instanceof TokenError) throw new TokenRefreshLogoutError(error);
     throw error;
   }
-};
-
-export const tokenRefresherFor = (
-  session: StoredSession,
-  onRefresh: (session: StoredSession) => void,
-): TokenRefreshFunction => {
-  let current = session;
-  return async (refreshToken) => {
-    current = await refreshSession({ ...current, refreshToken });
-    onRefresh(current);
-    return accessTokensOf(current);
-  };
 };
 
 export const signOut = async (session: StoredSession): Promise<void> => {

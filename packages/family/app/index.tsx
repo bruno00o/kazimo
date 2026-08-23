@@ -43,7 +43,7 @@ const previewLabel = (conversation: Conversation): string => {
 };
 
 export default function Home() {
-  const { client } = useSession();
+  const { client, signOut } = useSession();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [list, setList] = useState<Conversation[]>([]);
@@ -69,6 +69,13 @@ export default function Home() {
     },
     [client, refreshList],
   );
+
+  const confirmSignOut = useCallback(() => {
+    Alert.alert(t.signOut, undefined, [
+      { text: t.cancel, style: "cancel" },
+      { text: t.signOut, style: "destructive", onPress: () => void signOut() },
+    ]);
+  }, [signOut]);
 
   const runAction = useCallback(
     (actionKey: string, conversation: Conversation) => {
@@ -113,7 +120,17 @@ export default function Home() {
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
-      <Text style={styles.title}>{t.conversations}</Text>
+      <View style={styles.header}>
+        <Text style={styles.title}>{t.conversations}</Text>
+        <Pressable
+          style={styles.signOut}
+          accessibilityRole="button"
+          accessibilityLabel={t.signOut}
+          onPress={confirmSignOut}
+        >
+          <Icon name="signOut" color={tokens.theme.light.inkSoft} />
+        </Pressable>
+      </View>
       <FlashList
         data={list}
         keyExtractor={(conversation) => conversation.id}
@@ -163,12 +180,25 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: tokens.theme.light.ground,
   },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+  },
   title: {
+    flex: 1,
     fontSize: 34,
     fontWeight: "700",
     color: tokens.theme.light.ink,
-    paddingHorizontal: 20,
-    paddingBottom: 8,
+  },
+  signOut: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
   },
   list: {
     paddingBottom: 32,

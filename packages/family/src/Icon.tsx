@@ -21,6 +21,7 @@ const catalog = {
   read: { ios: "checkmark.circle.fill", android: "done_all" },
   attach: { ios: "photo.fill", android: "image" },
   close: { ios: "xmark", android: "close" },
+  signOut: { ios: "rectangle.portrait.and.arrow.right", android: "logout" },
 } satisfies Record<string, SymbolViewProps["name"]>;
 
 export type IconName = keyof typeof catalog;
