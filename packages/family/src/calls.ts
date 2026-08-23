@@ -12,6 +12,8 @@ import type { Strings } from "./i18n";
 
 const RTC_MEMBER_TYPES = new Set(["org.matrix.msc3401.call.member", "m.rtc.member", "io.element.rtc.member"]);
 
+const INCOMING_DEFAULT_HAS_VIDEO = true;
+
 export type IncomingCall = { roomId: string; title: string };
 
 export type CallCenter = {
@@ -62,7 +64,7 @@ export const startCallCenter = async (
       const { handle, name } = callerOf(room);
       byRoom.set(room.roomId, fresh);
       byUuid.set(fresh, { roomId: room.roomId, title: name });
-      ringIncoming(fresh, handle, name);
+      ringIncoming(fresh, handle, name, INCOMING_DEFAULT_HAS_VIDEO);
       return;
     }
     if (!remote && uuid) {

@@ -22,13 +22,18 @@ const PENDING_STATUSES = new Set<EventStatus>([
   EventStatus.QUEUED,
   EventStatus.ENCRYPTING,
 ]);
+const NOTHING_READ: ReadonlySet<string> = new Set<string>();
+const TYPING_TIMEOUT_MS = 8000;
+const TYPING_STOP_MS = 0;
 
-type Delivery = { mine: boolean; pending: boolean; failed: boolean };
+export type DeliveryState = "pending" | "sent" | "read";
+
+type Ownership = { mine: boolean; delivery: DeliveryState; failed: boolean };
 
 type Identity = { id: string; senderId: string; senderName: string; timestamp: number };
 
 export type ChatItem =
-  | ({ kind: "text"; body: string } & Identity & Delivery)
+  | ({ kind: "text"; body: string } & Identity & Ownership)
   | ({
       kind: "image";
       mxc: string;
@@ -37,7 +42,7 @@ export type ChatItem =
       blurhash: string | null;
       caption: string | null;
     } & Identity &
-      Delivery)
+      Ownership)
   | { kind: "dayMarker"; id: string; timestamp: number };
 
 export type ChatMessage =
@@ -103,9 +108,37 @@ export const localDayKey = (timestamp: number): string => {
   return `${date.getFullYear()}-${month}-${day}`;
 };
 
-const deliveryOf = (event: MatrixEvent, myUserId: string, senderId: string): Delivery => ({
+export const readUpTo = (
+  eventIds: readonly string[],
+  receiptEventIds: readonly string[],
+): ReadonlySet<string> => {
+  const receipts = new Set(receiptEventIds);
+  let lastReadIndex = -1;
+  eventIds.forEach((eventId, index) => {
+    if (receipts.has(eventId)) lastReadIndex = index;
+  });
+  return new Set(eventIds.slice(0, lastReadIndex + 1));
+};
+
+export type TypingMember = { userId: string; name: string; typing: boolean };
+
+export const typingNames = (members: readonly TypingMember[], myUserId: string): string[] =>
+  members.filter((member) => member.typing && member.userId !== myUserId).map((member) => member.name);
+
+const deliveryOf = (event: MatrixEvent, readEventIds: ReadonlySet<string>): DeliveryState => {
+  if (event.status !== null && PENDING_STATUSES.has(event.status)) return "pending";
+  const id = event.getId();
+  return id !== undefined && readEventIds.has(id) ? "read" : "sent";
+};
+
+const ownershipOf = (
+  event: MatrixEvent,
+  myUserId: string,
+  senderId: string,
+  readEventIds: ReadonlySet<string>,
+): Ownership => ({
   mine: senderId === myUserId,
-  pending: event.status !== null && PENDING_STATUSES.has(event.status),
+  delivery: deliveryOf(event, readEventIds),
   failed: event.status === EventStatus.NOT_SENT,
 });
 
@@ -113,6 +146,7 @@ export const toChatItems = (
   events: MatrixEvent[],
   myUserId: string,
   senderName: (userId: string) => string,
+  readEventIds: ReadonlySet<string> = NOTHING_READ,
 ): ChatItem[] => {
   const items: ChatItem[] = [];
   let currentDay: string | null = null;
@@ -132,7 +166,7 @@ export const toChatItems = (
 
     items.push({
       ...message,
-      ...deliveryOf(event, myUserId, senderId),
+      ...ownershipOf(event, myUserId, senderId, readEventIds),
       id,
       senderId,
       senderName: senderName(senderId),
@@ -145,10 +179,14 @@ export const toChatItems = (
 
 export type TimelineSource = {
   items: () => ChatItem[];
+  lastEvent: () => MatrixEvent | null;
   subscribe: (listener: () => void) => () => void;
   loadOlder: () => Promise<boolean>;
   stop: () => void;
 };
+
+const idsOf = (events: readonly MatrixEvent[]): string[] =>
+  events.map((event) => event.getId()).filter((id): id is string => id !== undefined);
 
 export const openTimeline = async (
   client: MatrixClient,
@@ -159,12 +197,18 @@ export const openTimeline = async (
   const senderName = (userId: string) => room.getMember(userId)?.name ?? userId;
   const listeners = new Set<() => void>();
 
+  const readByOthers = (events: readonly MatrixEvent[]): string[] =>
+    idsOf(events.filter((event) => room.getUsersReadUpTo(event).some((userId) => userId !== myUserId)));
+
+  const chatItemsOf = (events: MatrixEvent[]): ChatItem[] =>
+    toChatItems(events, myUserId, senderName, readUpTo(idsOf(events), readByOthers(events)));
+
   let window = new TimelineWindow(client, room.getUnfilteredTimelineSet());
   await window.load(undefined, pageSize);
-  let cached = toChatItems(window.getEvents(), myUserId, senderName);
+  let cached = chatItemsOf(window.getEvents());
 
   const recompute = () => {
-    cached = toChatItems(window.getEvents(), myUserId, senderName);
+    cached = chatItemsOf(window.getEvents());
     for (const listener of listeners) listener();
   };
 
@@ -206,13 +250,22 @@ export const openTimeline = async (
     void followLive();
   };
 
+  const onReceipt = (_event: MatrixEvent, receiptRoom: Room) => {
+    if (receiptRoom.roomId !== room.roomId) return;
+    recompute();
+  };
+
   room.on(RoomEvent.Timeline, onTimeline);
   room.on(RoomEvent.TimelineReset, onTimelineReset);
   room.on(RoomEvent.Redaction, onRedaction);
   room.on(RoomEvent.LocalEchoUpdated, onLocalEchoUpdated);
+  room.on(RoomEvent.Receipt, onReceipt);
 
   return {
     items: () => cached,
+    lastEvent: () =>
+      [...window.getEvents()].reverse().find((event) => event.status === null && messageOf(event) !== null) ??
+      null,
     subscribe(listener) {
       listeners.add(listener);
       return () => {
@@ -229,6 +282,7 @@ export const openTimeline = async (
       room.off(RoomEvent.TimelineReset, onTimelineReset);
       room.off(RoomEvent.Redaction, onRedaction);
       room.off(RoomEvent.LocalEchoUpdated, onLocalEchoUpdated);
+      room.off(RoomEvent.Receipt, onReceipt);
       listeners.clear();
     },
   };
@@ -236,3 +290,6 @@ export const openTimeline = async (
 
 export const sendText = (client: MatrixClient, roomId: string, body: string): Promise<ISendEventResponse> =>
   client.sendTextMessage(roomId, body);
+
+export const setTyping = (client: MatrixClient, roomId: string, typing: boolean): Promise<unknown> =>
+  client.sendTyping(roomId, typing, typing ? TYPING_TIMEOUT_MS : TYPING_STOP_MS);

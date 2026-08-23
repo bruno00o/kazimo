@@ -1,16 +1,35 @@
 import { tokens } from "@kazimo/shared";
-import { useConnectionState, useTracks } from "@livekit/components-react";
+import {
+  useConnectionState,
+  useLocalParticipant,
+  useRoomContext,
+  useTracks,
+} from "@livekit/components-react";
+import type { AppleAudioCategoryOption, AppleAudioConfiguration } from "@livekit/react-native";
 import { AudioSession, LiveKitRoom, VideoTrack } from "@livekit/react-native";
-import { ConnectionState, Track } from "livekit-client";
-import { PhoneOff } from "lucide-react-native";
+import { ConnectionState, Room, Track } from "livekit-client";
 import type { MatrixClient } from "matrix-js-sdk";
-import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { joinRtc, leaveRtc, type RtcSession, rtcFocusUrl, type SfuToken, sfuToken } from "./call";
-import { Icon } from "./Icon";
+import { Icon, type IconName } from "./Icon";
 import type { Strings } from "./i18n";
 
 type Load = { kind: "loading" } | { kind: "ready"; token: SfuToken } | { kind: "error"; message: string };
+
+type VideoInputDevice = MediaDeviceInfo & { facing?: string };
+
+const CONTROL_ICON_SIZE = 26;
+const HANG_UP_ICON_SIZE = 28;
+const FRONT_FACING = "front";
+const IOS_SPEAKER_OUTPUT = "force_speaker";
+const IOS_ROUTED_OUTPUT = "default";
+const SHARED_CATEGORY_OPTIONS: AppleAudioCategoryOption[] = [
+  "allowBluetooth",
+  "allowBluetoothA2DP",
+  "allowAirPlay",
+];
+const SPEAKER_CATEGORY_OPTION: AppleAudioCategoryOption = "defaultToSpeaker";
 
 const stateLabel = (strings: Strings): Record<ConnectionState, string> => ({
   [ConnectionState.Disconnected]: strings.stateDisconnected,
@@ -20,12 +39,53 @@ const stateLabel = (strings: Strings): Record<ConnectionState, string> => ({
   [ConnectionState.SignalReconnecting]: strings.stateReconnecting,
 });
 
+const appleAudioConfiguration = (video: boolean, speakerOn: boolean): AppleAudioConfiguration => ({
+  audioCategory: "playAndRecord",
+  audioCategoryOptions: speakerOn
+    ? [...SHARED_CATEGORY_OPTIONS, SPEAKER_CATEGORY_OPTION]
+    : SHARED_CATEGORY_OPTIONS,
+  audioMode: video ? "videoChat" : "voiceChat",
+});
+
+const applyAudioRoute = async (video: boolean, speakerOn: boolean): Promise<void> => {
+  if (Platform.OS !== "ios") return;
+  await AudioSession.setAppleAudioConfiguration(appleAudioConfiguration(video, speakerOn));
+  await AudioSession.selectAudioOutput(speakerOn ? IOS_SPEAKER_OUTPUT : IOS_ROUTED_OUTPUT);
+};
+
+const startCallAudio = async (video: boolean): Promise<void> => {
+  await AudioSession.configureAudio({ ios: { defaultOutput: video ? "speaker" : "earpiece" } });
+  await AudioSession.startAudioSession();
+  await applyAudioRoute(video, video);
+};
+
+const activeVideoDevice = (
+  devices: VideoInputDevice[],
+  selectedDeviceId: string | undefined,
+): VideoInputDevice | undefined =>
+  devices.find((device) => device.deviceId === selectedDeviceId) ??
+  devices.find((device) => device.facing === FRONT_FACING) ??
+  devices[0];
+
+const nextVideoDevice = (
+  devices: VideoInputDevice[],
+  selectedDeviceId: string | undefined,
+): VideoInputDevice | undefined => {
+  const active = activeVideoDevice(devices, selectedDeviceId);
+  if (!active) return undefined;
+  const opposite = active.facing
+    ? devices.find((device) => device.facing !== undefined && device.facing !== active.facing)
+    : undefined;
+  return opposite ?? devices.find((device) => device.deviceId !== active.deviceId);
+};
+
 export function CallView({
   client,
   homeserver,
   roomId,
   title,
   strings,
+  initialVideo,
   onLeave,
 }: {
   client: MatrixClient;
@@ -33,14 +93,21 @@ export function CallView({
   roomId: string;
   title: string;
   strings: Strings;
+  initialVideo: boolean;
   onLeave: () => void;
 }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const session = useRef<RtcSession | null>(null);
 
   useEffect(() => {
+    void startCallAudio(initialVideo).catch(() => {});
+    return () => {
+      void AudioSession.stopAudioSession().catch(() => {});
+    };
+  }, [initialVideo]);
+
+  useEffect(() => {
     let cancelled = false;
-    void AudioSession.startAudioSession().catch(() => {});
     (async () => {
       try {
         const serviceUrl = await rtcFocusUrl(homeserver);
@@ -60,7 +127,6 @@ export function CallView({
         void leaveRtc(session.current);
         session.current = null;
       }
-      void AudioSession.stopAudioSession().catch(() => {});
     };
   }, [client, homeserver, roomId]);
 
@@ -70,7 +136,9 @@ export function CallView({
         <Text style={styles.centerName}>{title}</Text>
         <ActivityIndicator color={tokens.color.blueSoft} />
         <Text style={styles.centerNote}>{strings.preparingCall}</Text>
-        <HangUp label={strings.hangUp} onLeave={onLeave} />
+        <View style={styles.controlBar}>
+          <HangUp label={strings.hangUp} onLeave={onLeave} />
+        </View>
       </View>
     );
   }
@@ -79,24 +147,84 @@ export function CallView({
     return (
       <View style={styles.center}>
         <Text style={styles.error}>{load.message}</Text>
-        <HangUp label={strings.hangUp} onLeave={onLeave} />
+        <View style={styles.controlBar}>
+          <HangUp label={strings.hangUp} onLeave={onLeave} />
+        </View>
       </View>
     );
   }
 
   return (
-    <LiveKitRoom serverUrl={load.token.url} token={load.token.jwt} connect audio video>
-      <Stage title={title} strings={strings} onLeave={onLeave} />
+    <LiveKitRoom serverUrl={load.token.url} token={load.token.jwt} connect audio video={initialVideo}>
+      <Stage title={title} strings={strings} initialVideo={initialVideo} onLeave={onLeave} />
     </LiveKitRoom>
   );
 }
 
-function Stage({ title, strings, onLeave }: { title: string; strings: Strings; onLeave: () => void }) {
+function Stage({
+  title,
+  strings,
+  initialVideo,
+  onLeave,
+}: {
+  title: string;
+  strings: Strings;
+  initialVideo: boolean;
+  onLeave: () => void;
+}) {
   const state = useConnectionState();
+  const room = useRoomContext();
+  const { localParticipant, isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant();
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
-  const remote = tracks.find((track) => !track.participant.isLocal);
+  const remote = tracks.find((track) => !track.participant.isLocal && !track.publication.isMuted);
   const local = tracks.find((track) => track.participant.isLocal);
   const connected = state === ConnectionState.Connected;
+
+  const [speakerOn, setSpeakerOn] = useState(initialVideo);
+  const [videoDevices, setVideoDevices] = useState<VideoInputDevice[]>([]);
+  const [selectedVideoDeviceId, setSelectedVideoDeviceId] = useState<string | undefined>(undefined);
+  const switchingCamera = useRef(false);
+
+  useEffect(() => {
+    if (!isCameraEnabled) return;
+    let cancelled = false;
+    const listDevices = async () => {
+      const devices = (await Room.getLocalDevices("videoinput", false)) as VideoInputDevice[];
+      if (!cancelled) setVideoDevices(devices);
+    };
+    void listDevices().catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isCameraEnabled]);
+
+  const toggleMicrophone = useCallback(() => {
+    void localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled).catch(() => {});
+  }, [localParticipant, isMicrophoneEnabled]);
+
+  const toggleCamera = useCallback(() => {
+    void localParticipant.setCameraEnabled(!isCameraEnabled).catch(() => {});
+  }, [localParticipant, isCameraEnabled]);
+
+  const flipCamera = useCallback(() => {
+    if (switchingCamera.current) return;
+    const next = nextVideoDevice(videoDevices, selectedVideoDeviceId);
+    if (!next) return;
+    switchingCamera.current = true;
+    void room
+      .switchActiveDevice("videoinput", next.deviceId)
+      .then(() => setSelectedVideoDeviceId(next.deviceId))
+      .catch(() => {})
+      .finally(() => {
+        switchingCamera.current = false;
+      });
+  }, [room, videoDevices, selectedVideoDeviceId]);
+
+  const toggleSpeaker = useCallback(() => {
+    const next = !speakerOn;
+    setSpeakerOn(next);
+    void applyAudioRoute(initialVideo, next).catch(() => {});
+  }, [speakerOn, initialVideo]);
 
   return (
     <View style={styles.stage}>
@@ -113,21 +241,64 @@ function Stage({ title, strings, onLeave }: { title: string; strings: Strings; o
         {!connected && <Text style={styles.stateText}>{stateLabel(strings)[state]}</Text>}
       </View>
 
-      {local && (
+      {isCameraEnabled && local && (
         <View style={styles.self}>
           <VideoTrack trackRef={local} objectFit="cover" mirror zOrder={1} style={styles.selfVideo} />
         </View>
       )}
 
-      <HangUp label={strings.hangUp} onLeave={onLeave} />
+      <View style={styles.controlBar}>
+        <Control
+          label={isMicrophoneEnabled ? strings.micOff : strings.micOn}
+          name={isMicrophoneEnabled ? "mic" : "micOff"}
+          filled={!isMicrophoneEnabled}
+          onPress={toggleMicrophone}
+        />
+        <Control
+          label={isCameraEnabled ? strings.cameraOff : strings.cameraOn}
+          name={isCameraEnabled ? "camera" : "cameraOff"}
+          filled={!isCameraEnabled}
+          onPress={toggleCamera}
+        />
+        {isCameraEnabled && videoDevices.length > 1 && (
+          <Control label={strings.flipCamera} name="flipCamera" filled={false} onPress={flipCamera} />
+        )}
+        {Platform.OS === "ios" && (
+          <Control label={strings.speaker} name="speaker" filled={speakerOn} onPress={toggleSpeaker} />
+        )}
+        <HangUp label={strings.hangUp} onLeave={onLeave} />
+      </View>
     </View>
+  );
+}
+
+function Control({
+  label,
+  name,
+  filled,
+  onPress,
+}: {
+  label: string;
+  name: IconName;
+  filled: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={[styles.control, filled ? styles.controlFilled : styles.controlTranslucent]}
+      onPress={onPress}
+    >
+      <Icon name={name} color={filled ? tokens.theme.dark.ground : "#ffffff"} size={CONTROL_ICON_SIZE} />
+    </Pressable>
   );
 }
 
 function HangUp({ label, onLeave }: { label: string; onLeave: () => void }) {
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={label} style={styles.hangUp} onPress={onLeave}>
-      <Icon glyph={PhoneOff} color="#ffffff" size={32} />
+      <Icon name="hangUp" color="#ffffff" size={HANG_UP_ICON_SIZE} />
     </Pressable>
   );
 }
@@ -219,12 +390,33 @@ const styles = StyleSheet.create({
   selfVideo: {
     flex: 1,
   },
-  hangUp: {
+  controlBar: {
     position: "absolute",
     bottom: 48,
-    alignSelf: "center",
-    width: 76,
-    height: 76,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    paddingHorizontal: 16,
+  },
+  control: {
+    width: 56,
+    height: 56,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  controlTranslucent: {
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+  },
+  controlFilled: {
+    backgroundColor: "#ffffff",
+  },
+  hangUp: {
+    width: 64,
+    height: 64,
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",

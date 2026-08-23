@@ -12,6 +12,25 @@ export interface Strings {
   send: string;
   call: string;
   loadingMessages: string;
+  encryptedUnavailable: string;
+  audioCall: string;
+  videoCall: string;
+  markRead: string;
+  mute: string;
+  unmute: string;
+  leaveConversation: string;
+  leaveConfirmBody: string;
+  leave: string;
+  typingOne: string;
+  typingMany: string;
+  sent: string;
+  read: string;
+  micOff: string;
+  micOn: string;
+  cameraOff: string;
+  cameraOn: string;
+  flipCamera: string;
+  speaker: string;
   preparingCall: string;
   waitingVideo: string;
   hangUp: string;
@@ -39,6 +58,25 @@ const en: Strings = {
   send: "Send",
   call: "Call",
   loadingMessages: "Loading messages",
+  encryptedUnavailable: "This conversation is encrypted and cannot be used from Kazimo yet.",
+  audioCall: "Audio call",
+  videoCall: "Video call",
+  markRead: "Mark as read",
+  mute: "Mute",
+  unmute: "Unmute",
+  leaveConversation: "Leave conversation",
+  leaveConfirmBody: "You will no longer receive messages from this conversation.",
+  leave: "Leave",
+  typingOne: "is typing",
+  typingMany: "are typing",
+  sent: "Sent",
+  read: "Read",
+  micOff: "Mute mic",
+  micOn: "Unmute mic",
+  cameraOff: "Turn camera off",
+  cameraOn: "Turn camera on",
+  flipCamera: "Flip camera",
+  speaker: "Speaker",
   preparingCall: "Preparing the call",
   waitingVideo: "Waiting for video",
   hangUp: "Hang up",
@@ -66,6 +104,25 @@ const fr: Strings = {
   send: "Envoyer",
   call: "Appeler",
   loadingMessages: "Chargement des messages",
+  encryptedUnavailable: "Cette conversation est chiffrée et ne peut pas encore être utilisée depuis Kazimo.",
+  audioCall: "Appel audio",
+  videoCall: "Appel vidéo",
+  markRead: "Marquer comme lu",
+  mute: "Mettre en sourdine",
+  unmute: "Réactiver",
+  leaveConversation: "Quitter la conversation",
+  leaveConfirmBody: "Vous ne recevrez plus les messages de cette conversation.",
+  leave: "Quitter",
+  typingOne: "écrit",
+  typingMany: "écrivent",
+  sent: "Envoyé",
+  read: "Lu",
+  micOff: "Couper le micro",
+  micOn: "Réactiver le micro",
+  cameraOff: "Couper la caméra",
+  cameraOn: "Activer la caméra",
+  flipCamera: "Retourner la caméra",
+  speaker: "Haut-parleur",
   preparingCall: "Préparation de l'appel",
   waitingVideo: "En attente de la vidéo",
   hangUp: "Raccrocher",
@@ -93,6 +150,25 @@ const ptPT: Strings = {
   send: "Enviar",
   call: "Ligar",
   loadingMessages: "A carregar mensagens",
+  encryptedUnavailable: "Esta conversa está cifrada e ainda não pode ser usada a partir do Kazimo.",
+  audioCall: "Chamada de voz",
+  videoCall: "Videochamada",
+  markRead: "Marcar como lida",
+  mute: "Silenciar",
+  unmute: "Reativar",
+  leaveConversation: "Sair da conversa",
+  leaveConfirmBody: "Deixas de receber mensagens desta conversa.",
+  leave: "Sair",
+  typingOne: "está a escrever",
+  typingMany: "estão a escrever",
+  sent: "Enviada",
+  read: "Lida",
+  micOff: "Desligar microfone",
+  micOn: "Ligar microfone",
+  cameraOff: "Desligar câmara",
+  cameraOn: "Ligar câmara",
+  flipCamera: "Virar câmara",
+  speaker: "Altifalante",
   preparingCall: "A preparar a chamada",
   waitingVideo: "À espera de vídeo",
   hangUp: "Terminar",
@@ -120,6 +196,25 @@ const es: Strings = {
   send: "Enviar",
   call: "Llamar",
   loadingMessages: "Cargando mensajes",
+  encryptedUnavailable: "Esta conversación está cifrada y aún no se puede usar desde Kazimo.",
+  audioCall: "Llamada de voz",
+  videoCall: "Videollamada",
+  markRead: "Marcar como leída",
+  mute: "Silenciar",
+  unmute: "Reactivar",
+  leaveConversation: "Salir de la conversación",
+  leaveConfirmBody: "Dejarás de recibir mensajes de esta conversación.",
+  leave: "Salir",
+  typingOne: "está escribiendo",
+  typingMany: "están escribiendo",
+  sent: "Enviado",
+  read: "Leído",
+  micOff: "Silenciar micro",
+  micOn: "Activar micro",
+  cameraOff: "Apagar cámara",
+  cameraOn: "Encender cámara",
+  flipCamera: "Girar cámara",
+  speaker: "Altavoz",
   preparingCall: "Preparando la llamada",
   waitingVideo: "Esperando el vídeo",
   hangUp: "Colgar",

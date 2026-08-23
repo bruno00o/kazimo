@@ -1,8 +1,14 @@
 import { Platform } from "react-native";
-import RNCallKeep from "react-native-callkeep";
+import RNCallKeep, { AudioSessionCategoryOption, AudioSessionMode } from "react-native-callkeep";
 import type { Strings } from "./i18n";
 
 export type CallKeepEvent = "answerCall" | "endCall";
+
+const CALL_AUDIO_CATEGORY_OPTIONS =
+  AudioSessionCategoryOption.allowBluetooth |
+  AudioSessionCategoryOption.allowBluetoothA2DP |
+  AudioSessionCategoryOption.allowAirPlay |
+  AudioSessionCategoryOption.defaultToSpeaker;
 
 export const setupCallKeep = async (strings: Strings): Promise<void> => {
   await RNCallKeep.setup({
@@ -11,6 +17,10 @@ export const setupCallKeep = async (strings: Strings): Promise<void> => {
       supportsVideo: true,
       maximumCallGroups: "1",
       maximumCallsPerCallGroup: "1",
+      audioSession: {
+        categoryOptions: CALL_AUDIO_CATEGORY_OPTIONS,
+        mode: AudioSessionMode.videoChat,
+      },
     },
     android: {
       alertTitle: strings.callPermissionsTitle,
@@ -28,8 +38,8 @@ export const setupCallKeep = async (strings: Strings): Promise<void> => {
   if (Platform.OS === "android") RNCallKeep.setAvailable(true);
 };
 
-export const ringIncoming = (uuid: string, handle: string, name: string): void => {
-  RNCallKeep.displayIncomingCall(uuid, handle, name, "generic", true);
+export const ringIncoming = (uuid: string, handle: string, name: string, hasVideo: boolean): void => {
+  RNCallKeep.displayIncomingCall(uuid, handle, name, "generic", hasVideo);
 };
 
 export const markActive = (uuid: string): void => {

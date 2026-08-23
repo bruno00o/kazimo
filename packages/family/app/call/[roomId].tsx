@@ -7,8 +7,10 @@ import { useSession } from "../../src/session-context";
 
 const t = appStrings();
 
+const AUDIO_ONLY_PARAM = "0";
+
 export default function CallScreen() {
-  const { roomId } = useLocalSearchParams<{ roomId: string }>();
+  const { roomId, video } = useLocalSearchParams<{ roomId: string; video?: string }>();
   const router = useRouter();
   const { client, homeserver, center, registerCallDismiss } = useSession();
 
@@ -27,6 +29,7 @@ export default function CallScreen() {
         roomId={roomId}
         title={client.getRoom(roomId)?.name ?? ""}
         strings={t}
+        initialVideo={video !== AUDIO_ONLY_PARAM}
         onLeave={() => {
           center?.hangup(roomId);
           router.back();

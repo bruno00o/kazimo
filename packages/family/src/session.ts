@@ -4,6 +4,7 @@ import {
   type MatrixClient,
   type MatrixEvent,
   NotificationCountType,
+  PushRuleActionName,
   type Room,
   SyncState,
 } from "matrix-js-sdk";
@@ -21,9 +22,12 @@ export type Conversation = {
   preview: { kind: "text"; body: string } | { kind: "photo" } | null;
   lastActive: number;
   unread: number;
+  muted: boolean;
+  encrypted: boolean;
 };
 
 const GROUP_THRESHOLD = 3;
+const PUSH_RULE_SCOPE = "global";
 
 export const whoami = async (homeserver: string, token: string): Promise<Identity> => {
   const res = await fetch(`${homeserver}/_matrix/client/v3/account/whoami`, {
@@ -79,6 +83,23 @@ const previewOf = (event: MatrixEvent | undefined): Conversation["preview"] => {
 const lastMessage = (room: Room): MatrixEvent | undefined =>
   [...room.getLiveTimeline().getEvents()].reverse().find((event) => event.getType() === "m.room.message");
 
+const isMuted = (room: Room): boolean => {
+  if (!room.client.pushRules) return false;
+  const rule = room.client.getRoomPushRule(PUSH_RULE_SCOPE, room.roomId);
+  return rule?.actions.includes(PushRuleActionName.DontNotify) ?? false;
+};
+
+export const setRoomMuted = async (client: MatrixClient, roomId: string, muted: boolean): Promise<void> => {
+  await client.setRoomMutePushRule(PUSH_RULE_SCOPE, roomId, muted);
+};
+
+export const markRead = async (client: MatrixClient, roomId: string): Promise<void> => {
+  const room = client.getRoom(roomId);
+  const event = room ? lastMessage(room) : undefined;
+  if (!event || event.status !== null) return;
+  await client.sendReadReceipt(event);
+};
+
 export const conversationOf = (room: Room, myUserId: string): Conversation => {
   const members = room.getJoinedMembers();
   const others = members.filter((member) => member.userId !== myUserId);
@@ -92,6 +113,8 @@ export const conversationOf = (room: Room, myUserId: string): Conversation => {
     preview: previewOf(lastMessage(room)),
     lastActive: room.getLastActiveTimestamp(),
     unread: room.getUnreadNotificationCount(NotificationCountType.Total),
+    muted: isMuted(room),
+    encrypted: room.hasEncryptionStateEvent(),
   };
 };
 

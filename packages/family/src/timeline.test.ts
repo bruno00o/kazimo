@@ -1,7 +1,6 @@
-/// <reference types="bun" />
 import { describe, expect, test } from "bun:test";
 import { EventStatus, type IContent, type IEvent, type MatrixClient, MatrixEvent } from "matrix-js-sdk";
-import { localDayKey, messageOf, sendText, toChatItems } from "./timeline";
+import { localDayKey, messageOf, readUpTo, sendText, setTyping, toChatItems, typingNames } from "./timeline";
 
 const ROOM_ID = "!room:kazimo.test";
 const ME = "@avo:kazimo.test";
@@ -182,7 +181,7 @@ describe("toChatItems", () => {
         body: "bom dia",
         timestamp: at(20, 9),
         mine: false,
-        pending: false,
+        delivery: "sent",
         failed: false,
       },
     ]);
@@ -190,7 +189,18 @@ describe("toChatItems", () => {
 
   test("flags my own messages", () => {
     const items = messages(toChatItems([textEvent("$1", ME, at(20, 9), "ola")], ME, nameOf));
-    expect(items[0]).toMatchObject({ mine: true, pending: false, failed: false });
+    expect(items[0]).toMatchObject({ mine: true, delivery: "sent", failed: false });
+  });
+
+  test("marks as read every message up to the newest receipt of another user", () => {
+    const events = [
+      textEvent("$1", ME, at(20, 9), "bom dia"),
+      textEvent("$2", RUI, at(20, 10), "bom dia"),
+      textEvent("$3", ME, at(20, 11), "ja comi"),
+    ];
+    const read = readUpTo(["$1", "$2", "$3"], ["$2"]);
+    const items = messages(toChatItems(events, ME, nameOf, read));
+    expect(items.map((item) => item.delivery)).toEqual(["read", "read", "sent"]);
   });
 
   test("flags local echoes as pending and rejected ones as failed", () => {
@@ -206,13 +216,20 @@ describe("toChatItems", () => {
     sent.setStatus(EventStatus.SENT);
 
     const items = messages(toChatItems([sending, queued, encrypting, failed, sent], ME, nameOf));
-    expect(items.map((item) => ({ pending: item.pending, failed: item.failed }))).toEqual([
-      { pending: true, failed: false },
-      { pending: true, failed: false },
-      { pending: true, failed: false },
-      { pending: false, failed: true },
-      { pending: false, failed: false },
+    expect(items.map((item) => ({ delivery: item.delivery, failed: item.failed }))).toEqual([
+      { delivery: "pending", failed: false },
+      { delivery: "pending", failed: false },
+      { delivery: "pending", failed: false },
+      { delivery: "sent", failed: true },
+      { delivery: "sent", failed: false },
     ]);
+  });
+
+  test("a receipt never overrides a still pending local echo", () => {
+    const pending = textEvent("$1", ME, at(20, 9), "a caminho");
+    pending.setStatus(EventStatus.SENDING);
+    const items = messages(toChatItems([pending], ME, nameOf, readUpTo(["$1"], ["$1"])));
+    expect(items[0]).toMatchObject({ delivery: "pending" });
   });
 
   test("drops redacted, edit and reaction events from the list", () => {
@@ -305,6 +322,38 @@ describe("toChatItems", () => {
   });
 });
 
+describe("readUpTo", () => {
+  test("everything before the newest receipt is read, nothing after it", () => {
+    expect([...readUpTo(["$1", "$2", "$3", "$4"], ["$1", "$3"])]).toEqual(["$1", "$2", "$3"]);
+  });
+
+  test("no receipt means nothing is read", () => {
+    expect([...readUpTo(["$1", "$2"], [])]).toEqual([]);
+  });
+
+  test("a receipt on an event outside the window is ignored", () => {
+    expect([...readUpTo(["$1", "$2"], ["$older"])]).toEqual([]);
+  });
+
+  test("an empty timeline yields an empty set", () => {
+    expect([...readUpTo([], ["$1"])]).toEqual([]);
+  });
+});
+
+describe("typingNames", () => {
+  const member = (userId: string, name: string, typing: boolean) => ({ userId, name, typing });
+
+  test("keeps the names of the others who are typing", () => {
+    expect(typingNames([member(RUI, "Rui", true), member("@ana:kazimo.test", "Ana", false)], ME)).toEqual([
+      "Rui",
+    ]);
+  });
+
+  test("never reports myself", () => {
+    expect(typingNames([member(ME, "Avo", true)], ME)).toEqual([]);
+  });
+});
+
 describe("sendText", () => {
   test("delegates to the client without a thread id", async () => {
     const calls: Array<[string, string]> = [];
@@ -317,5 +366,24 @@ describe("sendText", () => {
 
     await expect(sendText(client, ROOM_ID, "bom dia")).resolves.toEqual({ event_id: "$sent" });
     expect(calls).toEqual([[ROOM_ID, "bom dia"]]);
+  });
+});
+
+describe("setTyping", () => {
+  test("stopping typing expires the notification immediately", async () => {
+    const calls: Array<[string, boolean, number]> = [];
+    const client = {
+      sendTyping: async (roomId: string, typing: boolean, timeoutMs: number) => {
+        calls.push([roomId, typing, timeoutMs]);
+        return {};
+      },
+    } as unknown as MatrixClient;
+
+    await setTyping(client, ROOM_ID, true);
+    await setTyping(client, ROOM_ID, false);
+    expect(calls).toEqual([
+      [ROOM_ID, true, 8000],
+      [ROOM_ID, false, 0],
+    ]);
   });
 });
