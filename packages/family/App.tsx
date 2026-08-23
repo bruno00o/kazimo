@@ -7,7 +7,7 @@ import { CallView } from "./src/CallView";
 import { readEnv } from "./src/env";
 import { type Identity, type RoomSummary, roomSummaries, startSession, whoami } from "./src/session";
 
-const SPIKE_ROOM = "kazimo-call-spike";
+type Call = { roomId: string; title: string };
 
 type Phase =
   | { kind: "connecting" }
@@ -17,7 +17,7 @@ type Phase =
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>({ kind: "connecting" });
-  const [inCall, setInCall] = useState(false);
+  const [call, setCall] = useState<Call | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,14 +52,15 @@ export default function App() {
     };
   }, []);
 
-  if (phase.kind === "ready" && inCall) {
+  if (phase.kind === "ready" && call) {
     return (
       <View style={styles.call}>
         <CallView
           client={phase.client}
           homeserver={phase.homeserver}
-          roomName={SPIKE_ROOM}
-          onLeave={() => setInCall(false)}
+          roomId={call.roomId}
+          title={call.title}
+          onLeave={() => setCall(null)}
         />
         <StatusBar style="light" />
       </View>
@@ -73,7 +74,11 @@ export default function App() {
       {phase.kind === "config" && <ConfigHint />}
       {phase.kind === "error" && <Status label={phase.message} tone="error" />}
       {phase.kind === "ready" && (
-        <Ready identity={phase.identity} rooms={phase.rooms} onCall={() => setInCall(true)} />
+        <Ready
+          identity={phase.identity}
+          rooms={phase.rooms}
+          onCall={(room) => setCall({ roomId: room.id, title: room.name })}
+        />
       )}
       <StatusBar style="dark" />
     </View>
@@ -106,7 +111,7 @@ function Ready({
 }: {
   identity: Identity;
   rooms: RoomSummary[];
-  onCall: () => void;
+  onCall: (room: RoomSummary) => void;
 }) {
   return (
     <View style={styles.ready}>
@@ -114,17 +119,14 @@ function Ready({
       <Text style={styles.count}>{`${rooms.length} salas`}</Text>
       <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
         {rooms.map((room) => (
-          <View key={room.id} style={styles.row}>
+          <Pressable key={room.id} style={styles.row} onPress={() => onCall(room)}>
             <Text style={styles.roomName} numberOfLines={1}>
               {room.name}
             </Text>
             <Text style={styles.roomMembers}>{room.members}</Text>
-          </View>
+          </Pressable>
         ))}
       </ScrollView>
-      <Pressable style={styles.callButton} onPress={onCall}>
-        <Text style={styles.callButtonText}>Testar chamada</Text>
-      </Pressable>
     </View>
   );
 }
@@ -139,20 +141,6 @@ const styles = StyleSheet.create({
   call: {
     flex: 1,
     backgroundColor: tokens.theme.dark.ground,
-  },
-  callButton: {
-    marginTop: 16,
-    marginBottom: 24,
-    alignSelf: "flex-start",
-    paddingHorizontal: 28,
-    paddingVertical: 14,
-    borderRadius: 999,
-    backgroundColor: tokens.color.blueDeep,
-  },
-  callButtonText: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#ffffff",
   },
   brand: {
     fontSize: 40,

@@ -3,9 +3,18 @@ import { useConnectionState, useTracks } from "@livekit/components-react";
 import { AudioSession, LiveKitRoom, VideoTrack } from "@livekit/react-native";
 import { ConnectionState, Track } from "livekit-client";
 import type { MatrixClient } from "matrix-js-sdk";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
-import { rtcFocusUrl, type SfuClaims, type SfuToken, sfuClaims, sfuToken } from "./call";
+import {
+  joinRtc,
+  leaveRtc,
+  type RtcSession,
+  rtcFocusUrl,
+  type SfuClaims,
+  type SfuToken,
+  sfuClaims,
+  sfuToken,
+} from "./call";
 
 type Load = { kind: "loading" } | { kind: "ready"; token: SfuToken } | { kind: "error"; message: string };
 
@@ -20,15 +29,18 @@ const stateLabel: Record<ConnectionState, string> = {
 export function CallView({
   client,
   homeserver,
-  roomName,
+  roomId,
+  title,
   onLeave,
 }: {
   client: MatrixClient;
   homeserver: string;
-  roomName: string;
+  roomId: string;
+  title: string;
   onLeave: () => void;
 }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
+  const session = useRef<RtcSession | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -36,8 +48,10 @@ export function CallView({
     (async () => {
       try {
         const serviceUrl = await rtcFocusUrl(homeserver);
-        const token = await sfuToken(serviceUrl, client, roomName);
-        if (!cancelled) setLoad({ kind: "ready", token });
+        const token = await sfuToken(serviceUrl, client, roomId);
+        if (cancelled) return;
+        session.current = joinRtc(client, roomId, serviceUrl);
+        setLoad({ kind: "ready", token });
       } catch (error) {
         if (!cancelled) {
           setLoad({ kind: "error", message: error instanceof Error ? error.message : String(error) });
@@ -46,9 +60,13 @@ export function CallView({
     })();
     return () => {
       cancelled = true;
+      if (session.current) {
+        void leaveRtc(session.current);
+        session.current = null;
+      }
       void AudioSession.stopAudioSession();
     };
-  }, [client, homeserver, roomName]);
+  }, [client, homeserver, roomId]);
 
   if (load.kind === "loading") {
     return (
@@ -70,23 +88,16 @@ export function CallView({
   }
 
   return (
-    <LiveKitRoom serverUrl={load.token.url} token={load.token.jwt} connect audio={false} video={false}>
-      <Stage roomName={roomName} claims={sfuClaims(load.token.jwt)} onLeave={onLeave} />
+    <LiveKitRoom serverUrl={load.token.url} token={load.token.jwt} connect audio video>
+      <Stage title={title} claims={sfuClaims(load.token.jwt)} onLeave={onLeave} />
     </LiveKitRoom>
   );
 }
 
-function Stage({
-  roomName,
-  claims,
-  onLeave,
-}: {
-  roomName: string;
-  claims: SfuClaims | null;
-  onLeave: () => void;
-}) {
+function Stage({ title, claims, onLeave }: { title: string; claims: SfuClaims | null; onLeave: () => void }) {
   const state = useConnectionState();
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
+  const remote = tracks.filter((track) => !track.participant.isLocal);
 
   return (
     <View style={styles.stage}>
@@ -98,11 +109,12 @@ function Stage({
             style={styles.tile}
           />
         ))}
-        {tracks.length === 0 && <Text style={styles.placeholder}>sem vídeo</Text>}
+        {tracks.length === 0 && <Text style={styles.placeholder}>à espera de vídeo</Text>}
       </View>
       <View style={styles.hud}>
         <Text style={styles.state}>{stateLabel[state]}</Text>
-        <Text style={styles.meta}>{`sala ${roomName}`}</Text>
+        <Text style={styles.meta}>{title}</Text>
+        <Text style={styles.meta}>{`${remote.length} remotos`}</Text>
         {claims && <Text style={styles.meta}>{`sfu ${claims.room}`}</Text>}
       </View>
       <Leave onLeave={onLeave} />

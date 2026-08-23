@@ -45,7 +45,13 @@ export const startSession = async (
     };
     client.on(ClientEvent.Sync, onSync);
   });
+  await acceptInvites(client);
   return client;
+};
+
+const acceptInvites = async (client: MatrixClient): Promise<void> => {
+  const invited = client.getRooms().filter((room) => room.getMyMembership() === "invite");
+  await Promise.all(invited.map((room) => client.joinRoom(room.roomId).catch(() => undefined)));
 };
 
 export const roomSummaries = (client: MatrixClient): RoomSummary[] =>

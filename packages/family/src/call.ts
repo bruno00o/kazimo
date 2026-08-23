@@ -1,5 +1,7 @@
 import type { MatrixClient } from "matrix-js-sdk";
 
+export type RtcSession = ReturnType<MatrixClient["matrixRTC"]["getRoomSession"]>;
+
 export type SfuToken = {
   url: string;
   jwt: string;
@@ -41,6 +43,23 @@ export const sfuToken = async (
   if (!res.ok) throw new Error(`sfu ${res.status} ${await res.text()}`);
   const body = (await res.json()) as SfuToken;
   return { url: body.url, jwt: body.jwt };
+};
+
+export const joinRtc = (client: MatrixClient, roomId: string, serviceUrl: string): RtcSession => {
+  const room = client.getRoom(roomId);
+  if (!room) throw new Error(`unknown room ${roomId}`);
+  const userId = client.getUserId() ?? "";
+  const deviceId = client.getDeviceId() ?? "";
+  const focus = { type: "livekit", livekit_service_url: serviceUrl };
+  const session = client.matrixRTC.getRoomSession(room);
+  session.joinRTCSession({ userId, deviceId, memberId: `${userId}:${deviceId}` }, [focus], focus, {
+    manageMediaKeys: false,
+  });
+  return session;
+};
+
+export const leaveRtc = async (session: RtcSession): Promise<void> => {
+  await session.leaveRoomSession();
 };
 
 export const sfuClaims = (jwt: string): SfuClaims | null => {
