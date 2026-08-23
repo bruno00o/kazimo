@@ -4,6 +4,7 @@
     "slug": "family",
     "version": "1.0.0",
     "orientation": "portrait",
+    "scheme": "kazimo",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
@@ -28,7 +29,8 @@
       "@config-plugins/react-native-webrtc",
       "@config-plugins/react-native-callkeep",
       "./plugins/withIosBuildFix",
-      "expo-localization"
+      "expo-localization",
+      "expo-router"
     ]
   }
 }

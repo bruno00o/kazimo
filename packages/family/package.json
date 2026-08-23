@@ -15,7 +15,10 @@
     "@livekit/react-native": "^2.12.0",
     "@livekit/react-native-webrtc": "^144.1.2",
     "expo": "~57.0.15",
+    "expo-constants": "~57.0.13",
+    "expo-linking": "~57.0.7",
     "expo-localization": "~57.0.1",
+    "expo-router": "~57.0.15",
     "expo-status-bar": "~57.0.1",
     "livekit-client": "^2.19.0",
     "matrix-js-sdk": "42.1.0",
@@ -23,12 +26,23 @@
     "react-native": "0.86.2",
     "react-native-callkeep": "^4.3.16",
     "react-native-get-random-values": "~1.11.0",
-    "react-native-url-polyfill": "^4.0.0"
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "~4.26.0",
+    "react-native-url-polyfill": "^4.0.0",
+    "react-native-worklets": "0.10.1",
+    "text-encoding-polyfill": "^0.6.7"
   },
   "devDependencies": {
     "@config-plugins/react-native-callkeep": "^14.0.2",
     "@config-plugins/react-native-webrtc": "^15.0.2",
     "@livekit/react-native-expo-plugin": "^1.0.2",
     "@types/react": "~19.2.2"
+  },
+  "expo": {
+    "autolinking": {
+      "exclude": [
+        "react-native-reanimated"
+      ]
+    }
   }
 }

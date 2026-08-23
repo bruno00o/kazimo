@@ -19,6 +19,8 @@ export const tokens = {
     blue: "#1a73e8",
     blueDeep: "#0b57d0",
     blueSoft: "#d3e3fd",
+    danger: "#d93025",
+    dangerSoft: "#f28b82",
     shadow: "0 4px 30px rgba(0, 0, 0, 0.18)",
   },
   font: {

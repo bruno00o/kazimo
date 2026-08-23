@@ -12,5 +12,6 @@ config.resolver.nodeModulesPaths = [
   path.resolve(workspaceRoot, "node_modules"),
 ];
 config.resolver.unstable_enablePackageExports = true;
+config.resolver.blockList = [/\/repos\/.*/, /\/spikes\/.*/];
 
 module.exports = config;

@@ -5,16 +5,7 @@ import { ConnectionState, Track } from "livekit-client";
 import type { MatrixClient } from "matrix-js-sdk";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
-import {
-  joinRtc,
-  leaveRtc,
-  type RtcSession,
-  rtcFocusUrl,
-  type SfuClaims,
-  type SfuToken,
-  sfuClaims,
-  sfuToken,
-} from "./call";
+import { joinRtc, leaveRtc, type RtcSession, rtcFocusUrl, type SfuToken, sfuToken } from "./call";
 import type { Strings } from "./i18n";
 
 type Load = { kind: "loading" } | { kind: "ready"; token: SfuToken } | { kind: "error"; message: string };
@@ -47,7 +38,7 @@ export function CallView({
 
   useEffect(() => {
     let cancelled = false;
-    void AudioSession.startAudioSession();
+    void AudioSession.startAudioSession().catch(() => {});
     (async () => {
       try {
         const serviceUrl = await rtcFocusUrl(homeserver);
@@ -67,16 +58,17 @@ export function CallView({
         void leaveRtc(session.current);
         session.current = null;
       }
-      void AudioSession.stopAudioSession();
+      void AudioSession.stopAudioSession().catch(() => {});
     };
   }, [client, homeserver, roomId]);
 
   if (load.kind === "loading") {
     return (
       <View style={styles.center}>
+        <Text style={styles.centerName}>{title}</Text>
         <ActivityIndicator color={tokens.color.blueSoft} />
-        <Text style={styles.note}>{strings.preparingCall}</Text>
-        <Leave label={strings.hangUp} onLeave={onLeave} />
+        <Text style={styles.centerNote}>{strings.preparingCall}</Text>
+        <HangUp label={strings.hangUp} onLeave={onLeave} />
       </View>
     );
   }
@@ -85,132 +77,156 @@ export function CallView({
     return (
       <View style={styles.center}>
         <Text style={styles.error}>{load.message}</Text>
-        <Leave label={strings.hangUp} onLeave={onLeave} />
+        <HangUp label={strings.hangUp} onLeave={onLeave} />
       </View>
     );
   }
 
   return (
     <LiveKitRoom serverUrl={load.token.url} token={load.token.jwt} connect audio video>
-      <Stage title={title} claims={sfuClaims(load.token.jwt)} strings={strings} onLeave={onLeave} />
+      <Stage title={title} strings={strings} onLeave={onLeave} />
     </LiveKitRoom>
   );
 }
 
-function Stage({
-  title,
-  claims,
-  strings,
-  onLeave,
-}: {
-  title: string;
-  claims: SfuClaims | null;
-  strings: Strings;
-  onLeave: () => void;
-}) {
+function Stage({ title, strings, onLeave }: { title: string; strings: Strings; onLeave: () => void }) {
   const state = useConnectionState();
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
-  const remote = tracks.filter((track) => !track.participant.isLocal);
+  const remote = tracks.find((track) => !track.participant.isLocal);
+  const local = tracks.find((track) => track.participant.isLocal);
+  const connected = state === ConnectionState.Connected;
 
   return (
     <View style={styles.stage}>
-      <View style={styles.tiles}>
-        {tracks.map((track) => (
-          <VideoTrack
-            key={`${track.participant.identity}:${track.source}`}
-            trackRef={track}
-            style={styles.tile}
-          />
-        ))}
-        {tracks.length === 0 && <Text style={styles.placeholder}>{strings.waitingVideo}</Text>}
+      {remote ? (
+        <VideoTrack trackRef={remote} objectFit="cover" style={styles.remote} />
+      ) : (
+        <View style={styles.waiting}>
+          <Text style={styles.waitingState}>{strings.waitingVideo}</Text>
+        </View>
+      )}
+
+      <View pointerEvents="none" style={styles.topBar}>
+        <Text style={styles.name}>{title}</Text>
+        {!connected && <Text style={styles.stateText}>{stateLabel(strings)[state]}</Text>}
       </View>
-      <View style={styles.hud}>
-        <Text style={styles.state}>{stateLabel(strings)[state]}</Text>
-        <Text style={styles.meta}>{title}</Text>
-        <Text style={styles.meta}>{`${remote.length} ${strings.remotes}`}</Text>
-        {claims && <Text style={styles.meta}>{`sfu ${claims.room}`}</Text>}
-      </View>
-      <Leave label={strings.hangUp} onLeave={onLeave} />
+
+      {local && (
+        <View style={styles.self}>
+          <VideoTrack trackRef={local} objectFit="cover" mirror zOrder={1} style={styles.selfVideo} />
+        </View>
+      )}
+
+      <HangUp label={strings.hangUp} onLeave={onLeave} />
     </View>
   );
 }
 
-function Leave({ label, onLeave }: { label: string; onLeave: () => void }) {
+function HangUp({ label, onLeave }: { label: string; onLeave: () => void }) {
   return (
-    <Pressable style={styles.leave} onPress={onLeave}>
-      <Text style={styles.leaveText}>{label}</Text>
-    </Pressable>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={styles.hangUp}
+      onPress={onLeave}
+    />
   );
 }
+
+const shadow = {
+  textShadowColor: "rgba(0, 0, 0, 0.5)",
+  textShadowOffset: { width: 0, height: 1 },
+  textShadowRadius: 6,
+} as const;
 
 const styles = StyleSheet.create({
   center: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: 16,
+    gap: 14,
     backgroundColor: tokens.theme.dark.ground,
   },
-  stage: {
-    flex: 1,
-    backgroundColor: tokens.theme.dark.ground,
-  },
-  tiles: {
-    flex: 1,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  tile: {
-    flex: 1,
-    minWidth: 160,
-    aspectRatio: 3 / 4,
-    margin: 6,
-    borderRadius: 18,
-    backgroundColor: "#000000",
-  },
-  placeholder: {
-    fontSize: 16,
-    color: tokens.theme.dark.inkFaint,
-  },
-  hud: {
-    position: "absolute",
-    top: 72,
-    left: 24,
-    gap: 4,
-  },
-  state: {
-    fontSize: 28,
+  centerName: {
+    fontSize: 30,
     fontWeight: "600",
     color: tokens.theme.dark.ink,
   },
-  meta: {
-    fontSize: 14,
-    color: tokens.theme.dark.inkSoft,
-  },
-  note: {
+  centerNote: {
     fontSize: 16,
     color: tokens.theme.dark.inkSoft,
   },
   error: {
     fontSize: 16,
-    color: "#f28b82",
+    color: tokens.color.dangerSoft,
     textAlign: "center",
     paddingHorizontal: 24,
   },
-  leave: {
+  stage: {
+    flex: 1,
+    backgroundColor: tokens.theme.dark.ground,
+  },
+  remote: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  waiting: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  waitingState: {
+    fontSize: 16,
+    color: tokens.theme.dark.inkFaint,
+  },
+  topBar: {
+    position: "absolute",
+    top: 64,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    gap: 2,
+  },
+  name: {
+    fontSize: 24,
+    fontWeight: "600",
+    color: "#ffffff",
+    ...shadow,
+  },
+  stateText: {
+    fontSize: 15,
+    color: "rgba(255, 255, 255, 0.85)",
+    ...shadow,
+  },
+  self: {
+    position: "absolute",
+    bottom: 140,
+    right: 20,
+    width: 108,
+    height: 150,
+    borderRadius: 20,
+    overflow: "hidden",
+    backgroundColor: "#000000",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: tokens.theme.dark.inkFaint,
+  },
+  selfVideo: {
+    flex: 1,
+  },
+  hangUp: {
     position: "absolute",
     bottom: 48,
     alignSelf: "center",
-    paddingHorizontal: 40,
-    paddingVertical: 16,
+    width: 76,
+    height: 76,
     borderRadius: 999,
-    backgroundColor: "#d93025",
-  },
-  leaveText: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#ffffff",
+    backgroundColor: tokens.color.danger,
   },
 });

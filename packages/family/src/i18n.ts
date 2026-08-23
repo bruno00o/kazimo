@@ -7,7 +7,6 @@ export interface Strings {
   rooms: string;
   preparingCall: string;
   waitingVideo: string;
-  remotes: string;
   hangUp: string;
   stateDisconnected: string;
   stateConnecting: string;
@@ -28,7 +27,6 @@ const en: Strings = {
   rooms: "rooms",
   preparingCall: "Preparing the call",
   waitingVideo: "Waiting for video",
-  remotes: "remote",
   hangUp: "Hang up",
   stateDisconnected: "disconnected",
   stateConnecting: "connecting",
@@ -49,7 +47,6 @@ const fr: Strings = {
   rooms: "salons",
   preparingCall: "Préparation de l'appel",
   waitingVideo: "En attente de la vidéo",
-  remotes: "distants",
   hangUp: "Raccrocher",
   stateDisconnected: "déconnecté",
   stateConnecting: "connexion",
@@ -70,7 +67,6 @@ const ptPT: Strings = {
   rooms: "salas",
   preparingCall: "A preparar a chamada",
   waitingVideo: "À espera de vídeo",
-  remotes: "remotos",
   hangUp: "Terminar",
   stateDisconnected: "desligado",
   stateConnecting: "a ligar",
@@ -91,7 +87,6 @@ const es: Strings = {
   rooms: "salas",
   preparingCall: "Preparando la llamada",
   waitingVideo: "Esperando el vídeo",
-  remotes: "remotos",
   hangUp: "Colgar",
   stateDisconnected: "desconectado",
   stateConnecting: "conectando",
