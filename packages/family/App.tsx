@@ -1,18 +1,23 @@
 import { tokens } from "@kazimo/shared";
 import { StatusBar } from "expo-status-bar";
+import type { MatrixClient } from "matrix-js-sdk";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { CallView } from "./src/CallView";
 import { readEnv } from "./src/env";
 import { type Identity, type RoomSummary, roomSummaries, startSession, whoami } from "./src/session";
+
+const SPIKE_ROOM = "kazimo-call-spike";
 
 type Phase =
   | { kind: "connecting" }
   | { kind: "config" }
-  | { kind: "ready"; identity: Identity; rooms: RoomSummary[] }
+  | { kind: "ready"; client: MatrixClient; homeserver: string; identity: Identity; rooms: RoomSummary[] }
   | { kind: "error"; message: string };
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>({ kind: "connecting" });
+  const [inCall, setInCall] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -29,7 +34,13 @@ export default function App() {
           client.stopClient();
           return;
         }
-        setPhase({ kind: "ready", identity, rooms: roomSummaries(client) });
+        setPhase({
+          kind: "ready",
+          client,
+          homeserver: env.homeserver,
+          identity,
+          rooms: roomSummaries(client),
+        });
       } catch (error) {
         if (!cancelled) {
           setPhase({ kind: "error", message: error instanceof Error ? error.message : String(error) });
@@ -41,13 +52,29 @@ export default function App() {
     };
   }, []);
 
+  if (phase.kind === "ready" && inCall) {
+    return (
+      <View style={styles.call}>
+        <CallView
+          client={phase.client}
+          homeserver={phase.homeserver}
+          roomName={SPIKE_ROOM}
+          onLeave={() => setInCall(false)}
+        />
+        <StatusBar style="light" />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.screen}>
       <Text style={styles.brand}>Kazimo</Text>
       {phase.kind === "connecting" && <Status label="a sincronizar" spinner />}
       {phase.kind === "config" && <ConfigHint />}
       {phase.kind === "error" && <Status label={phase.message} tone="error" />}
-      {phase.kind === "ready" && <Ready identity={phase.identity} rooms={phase.rooms} />}
+      {phase.kind === "ready" && (
+        <Ready identity={phase.identity} rooms={phase.rooms} onCall={() => setInCall(true)} />
+      )}
       <StatusBar style="dark" />
     </View>
   );
@@ -72,7 +99,15 @@ function ConfigHint() {
   );
 }
 
-function Ready({ identity, rooms }: { identity: Identity; rooms: RoomSummary[] }) {
+function Ready({
+  identity,
+  rooms,
+  onCall,
+}: {
+  identity: Identity;
+  rooms: RoomSummary[];
+  onCall: () => void;
+}) {
   return (
     <View style={styles.ready}>
       <Text style={styles.userId}>{identity.userId}</Text>
@@ -87,6 +122,9 @@ function Ready({ identity, rooms }: { identity: Identity; rooms: RoomSummary[] }
           </View>
         ))}
       </ScrollView>
+      <Pressable style={styles.callButton} onPress={onCall}>
+        <Text style={styles.callButtonText}>Testar chamada</Text>
+      </Pressable>
     </View>
   );
 }
@@ -97,6 +135,24 @@ const styles = StyleSheet.create({
     paddingTop: 72,
     paddingHorizontal: 24,
     backgroundColor: tokens.theme.light.ground,
+  },
+  call: {
+    flex: 1,
+    backgroundColor: tokens.theme.dark.ground,
+  },
+  callButton: {
+    marginTop: 16,
+    marginBottom: 24,
+    alignSelf: "flex-start",
+    paddingHorizontal: 28,
+    paddingVertical: 14,
+    borderRadius: 999,
+    backgroundColor: tokens.color.blueDeep,
+  },
+  callButtonText: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#ffffff",
   },
   brand: {
     fontSize: 40,
