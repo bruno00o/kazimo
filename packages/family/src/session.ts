@@ -1,15 +1,29 @@
-import { ClientEvent, createClient, type MatrixClient, SyncState } from "matrix-js-sdk";
+import {
+  ClientEvent,
+  createClient,
+  type MatrixClient,
+  type MatrixEvent,
+  NotificationCountType,
+  type Room,
+  SyncState,
+} from "matrix-js-sdk";
 
 export type Identity = {
   userId: string;
   deviceId: string;
 };
 
-export type RoomSummary = {
+export type Conversation = {
   id: string;
   name: string;
-  members: number;
+  kind: "person" | "group";
+  otherUserId: string | null;
+  preview: { kind: "text"; body: string } | { kind: "photo" } | null;
+  lastActive: number;
+  unread: number;
 };
+
+const GROUP_THRESHOLD = 3;
 
 export const whoami = async (homeserver: string, token: string): Promise<Identity> => {
   const res = await fetch(`${homeserver}/_matrix/client/v3/account/whoami`, {
@@ -54,9 +68,38 @@ const acceptInvites = async (client: MatrixClient): Promise<void> => {
   await Promise.all(invited.map((room) => client.joinRoom(room.roomId).catch(() => undefined)));
 };
 
-export const roomSummaries = (client: MatrixClient): RoomSummary[] =>
-  client
+const previewOf = (event: MatrixEvent | undefined): Conversation["preview"] => {
+  if (event?.getType() !== "m.room.message" || event.isRedacted()) return null;
+  const content = event.getContent();
+  if (content.msgtype === "m.image") return { kind: "photo" };
+  if (typeof content.body === "string") return { kind: "text", body: content.body };
+  return null;
+};
+
+const lastMessage = (room: Room): MatrixEvent | undefined =>
+  [...room.getLiveTimeline().getEvents()].reverse().find((event) => event.getType() === "m.room.message");
+
+export const conversationOf = (room: Room, myUserId: string): Conversation => {
+  const members = room.getJoinedMembers();
+  const others = members.filter((member) => member.userId !== myUserId);
+  const isPerson = members.length < GROUP_THRESHOLD && others.length === 1;
+  const other = isPerson ? others[0] : undefined;
+  return {
+    id: room.roomId,
+    name: other?.name ?? room.name,
+    kind: isPerson ? "person" : "group",
+    otherUserId: other?.userId ?? null,
+    preview: previewOf(lastMessage(room)),
+    lastActive: room.getLastActiveTimestamp(),
+    unread: room.getUnreadNotificationCount(NotificationCountType.Total),
+  };
+};
+
+export const conversations = (client: MatrixClient): Conversation[] => {
+  const me = client.getUserId() ?? "";
+  return client
     .getRooms()
     .filter((room) => room.getMyMembership() === "join")
-    .map((room) => ({ id: room.roomId, name: room.name, members: room.getJoinedMemberCount() }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .map((room) => conversationOf(room, me))
+    .sort((a, b) => b.lastActive - a.lastActive);
+};

@@ -2,10 +2,12 @@ import { tokens } from "@kazimo/shared";
 import { useConnectionState, useTracks } from "@livekit/components-react";
 import { AudioSession, LiveKitRoom, VideoTrack } from "@livekit/react-native";
 import { ConnectionState, Track } from "livekit-client";
+import { PhoneOff } from "lucide-react-native";
 import type { MatrixClient } from "matrix-js-sdk";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { joinRtc, leaveRtc, type RtcSession, rtcFocusUrl, type SfuToken, sfuToken } from "./call";
+import { Icon } from "./Icon";
 import type { Strings } from "./i18n";
 
 type Load = { kind: "loading" } | { kind: "ready"; token: SfuToken } | { kind: "error"; message: string };
@@ -124,12 +126,9 @@ function Stage({ title, strings, onLeave }: { title: string; strings: Strings; o
 
 function HangUp({ label, onLeave }: { label: string; onLeave: () => void }) {
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      style={styles.hangUp}
-      onPress={onLeave}
-    />
+    <Pressable accessibilityRole="button" accessibilityLabel={label} style={styles.hangUp} onPress={onLeave}>
+      <Icon glyph={PhoneOff} color="#ffffff" size={32} />
+    </Pressable>
   );
 }
 
@@ -227,6 +226,8 @@ const styles = StyleSheet.create({
     width: 76,
     height: 76,
     borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: tokens.color.danger,
   },
 });

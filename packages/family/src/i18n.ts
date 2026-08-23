@@ -4,7 +4,14 @@ export interface Strings {
   locale: string;
   syncing: string;
   tokenMissing: string;
-  rooms: string;
+  conversations: string;
+  noConversations: string;
+  photo: string;
+  you: string;
+  messagePlaceholder: string;
+  send: string;
+  call: string;
+  loadingMessages: string;
   preparingCall: string;
   waitingVideo: string;
   hangUp: string;
@@ -24,7 +31,14 @@ const en: Strings = {
   locale: "en-GB",
   syncing: "Syncing",
   tokenMissing: "Token missing.",
-  rooms: "rooms",
+  conversations: "Conversations",
+  noConversations: "No conversations yet",
+  photo: "Photo",
+  you: "You",
+  messagePlaceholder: "Message",
+  send: "Send",
+  call: "Call",
+  loadingMessages: "Loading messages",
   preparingCall: "Preparing the call",
   waitingVideo: "Waiting for video",
   hangUp: "Hang up",
@@ -44,7 +58,14 @@ const fr: Strings = {
   locale: "fr-FR",
   syncing: "Synchronisation",
   tokenMissing: "Jeton manquant.",
-  rooms: "salons",
+  conversations: "Conversations",
+  noConversations: "Pas encore de conversation",
+  photo: "Photo",
+  you: "Vous",
+  messagePlaceholder: "Message",
+  send: "Envoyer",
+  call: "Appeler",
+  loadingMessages: "Chargement des messages",
   preparingCall: "Préparation de l'appel",
   waitingVideo: "En attente de la vidéo",
   hangUp: "Raccrocher",
@@ -64,7 +85,14 @@ const ptPT: Strings = {
   locale: "pt-PT",
   syncing: "A sincronizar",
   tokenMissing: "Falta o token.",
-  rooms: "salas",
+  conversations: "Conversas",
+  noConversations: "Ainda sem conversas",
+  photo: "Foto",
+  you: "Tu",
+  messagePlaceholder: "Mensagem",
+  send: "Enviar",
+  call: "Ligar",
+  loadingMessages: "A carregar mensagens",
   preparingCall: "A preparar a chamada",
   waitingVideo: "À espera de vídeo",
   hangUp: "Terminar",
@@ -84,7 +112,14 @@ const es: Strings = {
   locale: "es-ES",
   syncing: "Sincronizando",
   tokenMissing: "Falta el token.",
-  rooms: "salas",
+  conversations: "Conversaciones",
+  noConversations: "Aún no hay conversaciones",
+  photo: "Foto",
+  you: "Tú",
+  messagePlaceholder: "Mensaje",
+  send: "Enviar",
+  call: "Llamar",
+  loadingMessages: "Cargando mensajes",
   preparingCall: "Preparando la llamada",
   waitingVideo: "Esperando el vídeo",
   hangUp: "Colgar",

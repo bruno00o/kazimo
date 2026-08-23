@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "bun run --watch packages/kazimod/src/index.ts",
     "start": "NODE_ENV=production bun run packages/kazimod/src/index.ts",
-    "test": "bun test packages/shared/src packages/kiosk/src packages/kazimod/src",
+    "test": "bun test packages/shared/src packages/kiosk/src packages/kazimod/src packages/family/src",
     "typecheck": "tsc --noEmit -p packages/shared && tsc --noEmit -p packages/kiosk && tsc --noEmit -p packages/kazimod && tsc --noEmit -p packages/family",
     "check": "biome check packages",
     "format": "biome check --write packages"
