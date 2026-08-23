@@ -1,11 +1,14 @@
 import { tokens } from "@kazimo/shared";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
+import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { type MatrixEvent, type RoomMember, RoomMemberEvent } from "matrix-js-sdk";
+import { type MatrixClient, type MatrixEvent, type RoomMember, RoomMemberEvent } from "matrix-js-sdk";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -16,6 +19,16 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Icon } from "../../src/Icon";
 import { appStrings } from "../../src/i18n";
+import {
+  authenticatedImageSource,
+  blurhashOf,
+  CHAT_THUMBNAIL_EDGE,
+  FULL_SCREEN_EDGE,
+  fitWithin,
+  pickPhoto,
+  preparePhoto,
+  sendPhoto,
+} from "../../src/media";
 import { conversationOf } from "../../src/session";
 import { useSession } from "../../src/session-context";
 import {
@@ -34,6 +47,13 @@ const TYPING_THROTTLE_MS = 4000;
 const NEVER_TYPED = 0;
 const MINE_META_COLOR = "rgba(255, 255, 255, 0.8)";
 const TICK_SIZE = 14;
+const MAX_BUBBLE_WIDTH = 260;
+const MAX_BUBBLE_HEIGHT = 340;
+const PHOTO_TRANSITION_MS = 200;
+const VIEWER_CLOSE_SIZE = 36;
+const VIEWER_CLOSE_INSET = 8;
+
+type ViewedPhoto = { mxc: string; label: string };
 
 const timeOf = (timestamp: number) =>
   new Date(timestamp).toLocaleTimeString(t.locale, { hour: "2-digit", minute: "2-digit" });
@@ -63,9 +83,19 @@ export default function ChatScreen() {
   const [draft, setDraft] = useState("");
   const [hasOlder, setHasOlder] = useState(true);
   const [typists, setTypists] = useState<string[]>([]);
+  const [viewed, setViewed] = useState<ViewedPhoto | null>(null);
+  const [uploading, setUploading] = useState(false);
   const loadingOlder = useRef(false);
   const acknowledged = useRef<string | null>(null);
   const typingSentAt = useRef(NEVER_TYPED);
+  const onScreen = useRef(true);
+
+  useEffect(
+    () => () => {
+      onScreen.current = false;
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!room) return;
@@ -162,6 +192,25 @@ export default function ChatScreen() {
     void sendText(client, roomId, body).catch(() => {});
   }, [client, draft, roomId, stopTyping]);
 
+  const attach = useCallback(async () => {
+    if (!roomId) return;
+    try {
+      const picked = await pickPhoto();
+      if (!picked) return;
+      setUploading(true);
+      const prepared = await preparePhoto(picked.uri);
+      const blurhash = await blurhashOf(prepared.uri);
+      await sendPhoto(client, roomId, { ...prepared, blurhash });
+    } catch {
+      Alert.alert(t.photoSendFailed);
+    } finally {
+      if (onScreen.current) setUploading(false);
+    }
+  }, [client, roomId]);
+
+  const openPhoto = useCallback((photo: ViewedPhoto) => setViewed(photo), []);
+  const closePhoto = useCallback(() => setViewed(null), []);
+
   const typingLabel = typingLabelOf(typists);
 
   if (!roomId || !room || !conversation) return null;
@@ -217,7 +266,14 @@ export default function ChatScreen() {
           onStartReachedThreshold={0.4}
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
-          renderItem={({ item }) => <Row item={item} showSender={conversation.kind === "group"} />}
+          renderItem={({ item }) => (
+            <Row
+              item={item}
+              showSender={conversation.kind === "group"}
+              client={client}
+              onOpenPhoto={openPhoto}
+            />
+          )}
         />
       )}
 
@@ -232,6 +288,19 @@ export default function ChatScreen() {
         </View>
       ) : (
         <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t.attachPhoto}
+            style={[styles.attach, uploading && styles.sendDisabled]}
+            onPress={() => void attach()}
+            disabled={uploading || conversation.encrypted}
+          >
+            {uploading ? (
+              <ActivityIndicator color={tokens.color.blueDeep} />
+            ) : (
+              <Icon name="attach" color={tokens.color.blueDeep} size={20} />
+            )}
+          </Pressable>
           <TextInput
             style={styles.input}
             value={draft}
@@ -253,32 +322,96 @@ export default function ChatScreen() {
           </Pressable>
         </View>
       )}
+
+      <Modal
+        visible={viewed !== null}
+        presentationStyle="fullScreen"
+        animationType="fade"
+        onRequestClose={closePhoto}
+      >
+        <View style={styles.viewer}>
+          <Pressable style={styles.viewerCanvas} onPress={closePhoto}>
+            {viewed !== null && (
+              <Image
+                source={authenticatedImageSource(client, viewed.mxc, FULL_SCREEN_EDGE, FULL_SCREEN_EDGE)}
+                style={styles.viewerImage}
+                contentFit="contain"
+                cachePolicy="memory-disk"
+                transition={PHOTO_TRANSITION_MS}
+                accessibilityLabel={viewed.label}
+              />
+            )}
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t.photoFull}
+            style={[styles.viewerClose, { top: insets.top + VIEWER_CLOSE_INSET }]}
+            onPress={closePhoto}
+          >
+            <Icon name="close" color={tokens.theme.dark.ink} size={18} />
+          </Pressable>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
 
-function Row({ item, showSender }: { item: ChatItem; showSender: boolean }) {
+function Row({
+  item,
+  showSender,
+  client,
+  onOpenPhoto,
+}: {
+  item: ChatItem;
+  showSender: boolean;
+  client: MatrixClient;
+  onOpenPhoto: (photo: ViewedPhoto) => void;
+}) {
   if (item.kind === "dayMarker") {
     return <Text style={styles.dayMarker}>{dayOf(item.timestamp)}</Text>;
   }
   const mine = item.mine;
+  const isPhoto = item.kind === "image";
   return (
     <View style={[styles.bubbleRow, mine && styles.bubbleRowMine]}>
       <View
         style={[
           styles.bubble,
           mine ? styles.bubbleMine : styles.bubbleTheirs,
+          isPhoto && styles.bubblePhoto,
           item.delivery === "pending" && styles.bubblePending,
           item.failed && styles.bubbleFailed,
         ]}
       >
-        {showSender && !mine && <Text style={styles.sender}>{item.senderName}</Text>}
+        {showSender && !mine && (
+          <Text style={[styles.sender, isPhoto && styles.photoInsetTop]}>{item.senderName}</Text>
+        )}
         {item.kind === "text" ? (
           <Text style={[styles.bodyText, mine && styles.bodyTextMine]}>{item.body}</Text>
         ) : (
-          <Text style={[styles.bodyText, mine && styles.bodyTextMine]}>{item.caption ?? t.photo}</Text>
+          <Pressable
+            accessibilityRole="imagebutton"
+            accessibilityLabel={item.caption ?? t.photo}
+            onPress={() => onOpenPhoto({ mxc: item.mxc, label: item.caption ?? t.photo })}
+          >
+            <Image
+              source={authenticatedImageSource(client, item.mxc, CHAT_THUMBNAIL_EDGE, CHAT_THUMBNAIL_EDGE)}
+              style={fitWithin(item.width, item.height, MAX_BUBBLE_WIDTH, MAX_BUBBLE_HEIGHT)}
+              placeholder={item.blurhash === null ? undefined : { blurhash: item.blurhash }}
+              cachePolicy="memory-disk"
+              contentFit="cover"
+              transition={PHOTO_TRANSITION_MS}
+              recyclingKey={item.id}
+              accessibilityLabel={item.caption ?? t.photo}
+            />
+          </Pressable>
         )}
-        <View style={styles.metaRow}>
+        {item.kind === "image" && item.caption !== null && (
+          <Text style={[styles.bodyText, mine && styles.bodyTextMine, styles.photoInset]}>
+            {item.caption}
+          </Text>
+        )}
+        <View style={[styles.metaRow, isPhoto && styles.photoInsetBottom]}>
           <Text style={[styles.meta, mine && styles.metaMine]}>{timeOf(item.timestamp)}</Text>
           {mine && item.delivery !== "pending" && (
             <View accessibilityLabel={item.delivery === "read" ? t.read : t.sent}>
@@ -373,6 +506,25 @@ const styles = StyleSheet.create({
     backgroundColor: tokens.color.blue,
     borderBottomRightRadius: 6,
   },
+  bubblePhoto: {
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    overflow: "hidden",
+    gap: 0,
+  },
+  photoInset: {
+    paddingHorizontal: 12,
+    paddingTop: 6,
+  },
+  photoInsetTop: {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  photoInsetBottom: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
   bubblePending: {
     opacity: 0.55,
   },
@@ -453,5 +605,34 @@ const styles = StyleSheet.create({
   },
   sendDisabled: {
     opacity: 0.4,
+  },
+  attach: {
+    width: 42,
+    height: 42,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: tokens.color.blueSoft,
+  },
+  viewer: {
+    flex: 1,
+    backgroundColor: tokens.theme.dark.ground,
+  },
+  viewerCanvas: {
+    flex: 1,
+  },
+  viewerImage: {
+    flex: 1,
+    width: "100%",
+  },
+  viewerClose: {
+    position: "absolute",
+    right: VIEWER_CLOSE_INSET,
+    width: VIEWER_CLOSE_SIZE,
+    height: VIEWER_CLOSE_SIZE,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: tokens.theme.dark.inkFaint,
   },
 });

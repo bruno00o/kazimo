@@ -1,8 +1,18 @@
 import { tokens } from "@kazimo/shared";
 import { useRouter } from "expo-router";
-import type { MatrixClient } from "matrix-js-sdk";
+import { HttpApiEvent, type MatrixClient, TokenRefreshLogoutError } from "matrix-js-sdk";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import Login from "../app/login";
+import {
+  clearSession,
+  isExpiringSoon,
+  loadSession,
+  refreshSession,
+  signOut as revokeAndForget,
+  type StoredSession,
+  tokenRefresherFor,
+} from "./auth";
 import { type CallCenter, startCallCenter } from "./calls";
 import { readEnv } from "./env";
 import { appStrings } from "./i18n";
@@ -16,6 +26,7 @@ type Session = {
   identity: Identity;
   center: CallCenter | null;
   registerCallDismiss: (roomId: string, dismiss: () => void) => () => void;
+  signOut: () => Promise<void>;
 };
 
 const SessionContext = createContext<Session | null>(null);
@@ -26,17 +37,66 @@ export const useSession = (): Session => {
   return value;
 };
 
+type Credentials =
+  | { kind: "stored"; session: StoredSession }
+  | { kind: "env"; homeserver: string; token: string };
+
+type Connected = {
+  client: MatrixClient;
+  homeserver: string;
+  identity: Identity;
+  stored: StoredSession | null;
+};
+
 type Phase =
-  | { kind: "connecting" }
-  | { kind: "config" }
-  | { kind: "ready"; client: MatrixClient; homeserver: string; identity: Identity }
+  | { kind: "loading" }
+  | { kind: "signedOut" }
+  | { kind: "connecting"; credentials: Credentials }
+  | { kind: "ready"; connected: Connected }
   | { kind: "error"; message: string };
+
+const credentialsOf = (stored: StoredSession | null): Credentials | null => {
+  if (stored) return { kind: "stored", session: stored };
+  const env = readEnv();
+  return env ? { kind: "env", homeserver: env.homeserver, token: env.token } : null;
+};
+
+const open = async (
+  homeserver: string,
+  token: string,
+  stored: StoredSession | null,
+  onRefresh?: (session: StoredSession) => void,
+): Promise<Connected> => {
+  const identity = await whoami(homeserver, token);
+  const refresh =
+    stored?.refreshToken && onRefresh
+      ? { refreshToken: stored.refreshToken, tokenRefreshFunction: tokenRefresherFor(stored, onRefresh) }
+      : undefined;
+  const client = await startSession(homeserver, token, identity, refresh);
+  return { client, homeserver, identity, stored };
+};
+
+const connect = async (
+  credentials: Credentials,
+  onRefresh: (session: StoredSession) => void,
+): Promise<Connected> => {
+  if (credentials.kind === "env") return open(credentials.homeserver, credentials.token, null);
+  const stored = credentials.session;
+  const fresh = isExpiringSoon(stored, Date.now()) ? await refreshSession(stored) : stored;
+  const connected = await open(fresh.homeserver, fresh.accessToken, fresh, onRefresh).catch(async (error) => {
+    if (!fresh.refreshToken) throw error;
+    const refreshed = await refreshSession(fresh);
+    return open(refreshed.homeserver, refreshed.accessToken, refreshed, onRefresh);
+  });
+  return connected;
+};
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const [phase, setPhase] = useState<Phase>({ kind: "connecting" });
+  const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   const [center, setCenter] = useState<CallCenter | null>(null);
   const dismissers = useRef(new Map<string, () => void>());
+  const latestStored = useRef<StoredSession | null>(null);
 
   const registerCallDismiss = useCallback((roomId: string, dismiss: () => void) => {
     dismissers.current.set(roomId, dismiss);
@@ -45,34 +105,73 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const rememberStored = useCallback((session: StoredSession) => {
+    latestStored.current = session;
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
-    const env = readEnv();
-    if (!env) {
-      setPhase({ kind: "config" });
-      return;
-    }
-    (async () => {
-      try {
-        const identity = await whoami(env.homeserver, env.token);
-        const client = await startSession(env.homeserver, env.token, identity);
-        if (cancelled) {
-          client.stopClient();
-          return;
-        }
-        setPhase({ kind: "ready", client, homeserver: env.homeserver, identity });
-      } catch (error) {
-        if (!cancelled) {
-          setPhase({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-        }
-      }
-    })();
+    loadSession()
+      .catch(() => null)
+      .then((stored) => {
+        if (cancelled) return;
+        const credentials = credentialsOf(stored);
+        setPhase(credentials ? { kind: "connecting", credentials } : { kind: "signedOut" });
+      });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const client = phase.kind === "ready" ? phase.client : null;
+  const credentials = phase.kind === "connecting" ? phase.credentials : null;
+
+  useEffect(() => {
+    if (!credentials) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const connected = await connect(credentials, rememberStored);
+        if (cancelled) {
+          connected.client.stopClient();
+          return;
+        }
+        latestStored.current = connected.stored;
+        setPhase({ kind: "ready", connected });
+      } catch (error) {
+        if (cancelled) return;
+        if (error instanceof TokenRefreshLogoutError) {
+          await clearSession().catch(() => undefined);
+          setPhase({ kind: "signedOut" });
+          return;
+        }
+        setPhase({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [credentials, rememberStored]);
+
+  const client = phase.kind === "ready" ? phase.connected.client : null;
+
+  const signOut = useCallback(async () => {
+    client?.stopClient();
+    const stored = latestStored.current;
+    latestStored.current = null;
+    if (stored) await revokeAndForget(stored).catch(() => undefined);
+    setPhase({ kind: "signedOut" });
+  }, [client]);
+
+  useEffect(() => {
+    if (!client) return;
+    const onLoggedOut = () => {
+      void signOut();
+    };
+    client.on(HttpApiEvent.SessionLoggedOut, onLoggedOut);
+    return () => {
+      client.off(HttpApiEvent.SessionLoggedOut, onLoggedOut);
+    };
+  }, [client, signOut]);
 
   useEffect(() => {
     if (!client) return;
@@ -101,18 +200,25 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     };
   }, [client, router]);
 
-  if (phase.kind === "connecting") return <Status label={t.syncing} spinner />;
-  if (phase.kind === "config") return <ConfigHint />;
+  if (phase.kind === "loading" || phase.kind === "connecting") return <Status label={t.syncing} spinner />;
+  if (phase.kind === "signedOut") {
+    return (
+      <Login
+        onSignedIn={(session) => setPhase({ kind: "connecting", credentials: { kind: "stored", session } })}
+      />
+    );
+  }
   if (phase.kind === "error") return <Status label={phase.message} tone="error" />;
 
   return (
     <SessionContext.Provider
       value={{
-        client: phase.client,
-        homeserver: phase.homeserver,
-        identity: phase.identity,
+        client: phase.connected.client,
+        homeserver: phase.connected.homeserver,
+        identity: phase.connected.identity,
         center,
         registerCallDismiss,
+        signOut,
       }}
     >
       {children}
@@ -125,16 +231,6 @@ function Status({ label, spinner, tone }: { label: string; spinner?: boolean; to
     <View style={styles.center}>
       {spinner && <ActivityIndicator color={tokens.color.blue} />}
       <Text style={[styles.statusText, tone === "error" && styles.errorText]}>{label}</Text>
-    </View>
-  );
-}
-
-function ConfigHint() {
-  return (
-    <View style={styles.center}>
-      <Text style={styles.statusText}>{t.tokenMissing}</Text>
-      <Text style={styles.hint}>packages/family/.env.local</Text>
-      <Text style={styles.hint}>EXPO_PUBLIC_MATRIX_TOKEN=...</Text>
     </View>
   );
 }
@@ -155,9 +251,5 @@ const styles = StyleSheet.create({
   },
   errorText: {
     color: tokens.color.danger,
-  },
-  hint: {
-    fontSize: 14,
-    color: tokens.theme.light.inkSoft,
   },
 });

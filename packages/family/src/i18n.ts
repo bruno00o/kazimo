@@ -13,6 +13,17 @@ export interface Strings {
   call: string;
   loadingMessages: string;
   encryptedUnavailable: string;
+  attachPhoto: string;
+  photoSendFailed: string;
+  signIn: string;
+  signOut: string;
+  signingIn: string;
+  signInFailed: string;
+  homeserver: string;
+  homeserverPlaceholder: string;
+  welcome: string;
+  welcomeBody: string;
+  photoFull: string;
   audioCall: string;
   videoCall: string;
   markRead: string;
@@ -59,6 +70,17 @@ const en: Strings = {
   call: "Call",
   loadingMessages: "Loading messages",
   encryptedUnavailable: "This conversation is encrypted and cannot be used from Kazimo yet.",
+  attachPhoto: "Send a photo",
+  photoSendFailed: "The photo could not be sent.",
+  signIn: "Sign in",
+  signOut: "Sign out",
+  signingIn: "Signing in",
+  signInFailed: "Sign in failed.",
+  homeserver: "Homeserver",
+  homeserverPlaceholder: "matrix.example.org",
+  welcome: "Welcome to Kazimo",
+  welcomeBody: "Sign in with your family account to see your conversations.",
+  photoFull: "Photo",
   audioCall: "Audio call",
   videoCall: "Video call",
   markRead: "Mark as read",
@@ -105,6 +127,17 @@ const fr: Strings = {
   call: "Appeler",
   loadingMessages: "Chargement des messages",
   encryptedUnavailable: "Cette conversation est chiffrée et ne peut pas encore être utilisée depuis Kazimo.",
+  attachPhoto: "Envoyer une photo",
+  photoSendFailed: "La photo n'a pas pu être envoyée.",
+  signIn: "Se connecter",
+  signOut: "Se déconnecter",
+  signingIn: "Connexion",
+  signInFailed: "La connexion a échoué.",
+  homeserver: "Serveur",
+  homeserverPlaceholder: "matrix.exemple.org",
+  welcome: "Bienvenue sur Kazimo",
+  welcomeBody: "Connectez-vous avec votre compte famille pour voir vos conversations.",
+  photoFull: "Photo",
   audioCall: "Appel audio",
   videoCall: "Appel vidéo",
   markRead: "Marquer comme lu",
@@ -151,6 +184,17 @@ const ptPT: Strings = {
   call: "Ligar",
   loadingMessages: "A carregar mensagens",
   encryptedUnavailable: "Esta conversa está cifrada e ainda não pode ser usada a partir do Kazimo.",
+  attachPhoto: "Enviar uma foto",
+  photoSendFailed: "Não foi possível enviar a foto.",
+  signIn: "Iniciar sessão",
+  signOut: "Terminar sessão",
+  signingIn: "A iniciar sessão",
+  signInFailed: "Não foi possível iniciar sessão.",
+  homeserver: "Servidor",
+  homeserverPlaceholder: "matrix.exemplo.org",
+  welcome: "Bem-vindo ao Kazimo",
+  welcomeBody: "Inicia sessão com a tua conta da família para veres as tuas conversas.",
+  photoFull: "Foto",
   audioCall: "Chamada de voz",
   videoCall: "Videochamada",
   markRead: "Marcar como lida",
@@ -197,6 +241,17 @@ const es: Strings = {
   call: "Llamar",
   loadingMessages: "Cargando mensajes",
   encryptedUnavailable: "Esta conversación está cifrada y aún no se puede usar desde Kazimo.",
+  attachPhoto: "Enviar una foto",
+  photoSendFailed: "No se pudo enviar la foto.",
+  signIn: "Iniciar sesión",
+  signOut: "Cerrar sesión",
+  signingIn: "Iniciando sesión",
+  signInFailed: "No se pudo iniciar sesión.",
+  homeserver: "Servidor",
+  homeserverPlaceholder: "matrix.ejemplo.org",
+  welcome: "Bienvenido a Kazimo",
+  welcomeBody: "Inicia sesión con tu cuenta familiar para ver tus conversaciones.",
+  photoFull: "Foto",
   audioCall: "Llamada de voz",
   videoCall: "Videollamada",
   markRead: "Marcar como leída",

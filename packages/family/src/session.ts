@@ -7,7 +7,9 @@ import {
   PushRuleActionName,
   type Room,
   SyncState,
+  type TokenRefreshFunction,
 } from "matrix-js-sdk";
+import { createSqliteStore, databaseNameForUser } from "./store";
 
 export type Identity = {
   userId: string;
@@ -27,6 +29,7 @@ export type Conversation = {
 };
 
 const GROUP_THRESHOLD = 3;
+const INITIAL_SYNC_LIMIT = 20;
 const PUSH_RULE_SCOPE = "global";
 
 export const whoami = async (homeserver: string, token: string): Promise<Identity> => {
@@ -38,19 +41,30 @@ export const whoami = async (homeserver: string, token: string): Promise<Identit
   return { userId: body.user_id, deviceId: body.device_id ?? "" };
 };
 
+export type SessionRefresh = {
+  refreshToken: string;
+  tokenRefreshFunction: TokenRefreshFunction;
+};
+
 export const startSession = async (
   homeserver: string,
   token: string,
   identity: Identity,
+  refresh?: SessionRefresh,
 ): Promise<MatrixClient> => {
+  const store = createSqliteStore({ dbName: databaseNameForUser(identity.userId) });
   const client = createClient({
     baseUrl: homeserver,
     accessToken: token,
     userId: identity.userId,
     deviceId: identity.deviceId || undefined,
     useAuthorizationHeader: true,
+    store,
+    refreshToken: refresh?.refreshToken,
+    tokenRefreshFunction: refresh?.tokenRefreshFunction,
   });
-  await client.startClient({ initialSyncLimit: 20 });
+  await store.startup();
+  await client.startClient({ initialSyncLimit: INITIAL_SYNC_LIMIT });
   await new Promise<void>((resolve, reject) => {
     const onSync = (state: SyncState) => {
       if (state === SyncState.Prepared) {
@@ -125,4 +139,10 @@ export const conversations = (client: MatrixClient): Conversation[] => {
     .filter((room) => room.getMyMembership() === "join")
     .map((room) => conversationOf(room, me))
     .sort((a, b) => b.lastActive - a.lastActive);
+};
+
+export const endSession = async (client: MatrixClient): Promise<void> => {
+  client.stopClient();
+  await client.store.deleteAllData();
+  await client.store.destroy();
 };

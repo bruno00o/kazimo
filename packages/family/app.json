@@ -30,7 +30,18 @@
       "@config-plugins/react-native-callkeep",
       "./plugins/withIosBuildFix",
       "expo-localization",
-      "expo-router"
+      "expo-router",
+      "expo-image",
+      "expo-sqlite",
+      "expo-web-browser",
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Kazimo uses your photos to send them to your family.",
+          "cameraPermission": "Kazimo uses the camera for video calls and photos."
+        }
+      ]
     ]
   }
 }
