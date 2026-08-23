@@ -5,6 +5,7 @@
     "packages/*"
   ],
   "trustedDependencies": [
+    "@unomed/react-native-matrix-sdk",
     "onnxruntime-node"
   ],
   "scripts": {
