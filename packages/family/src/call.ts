@@ -20,6 +20,8 @@ const OLDEST_MEMBERSHIP_SELECTION = "oldest_membership";
 const MEMBERSHIP_EXPIRY_MS = 4 * 60 * 60 * 1000;
 const CLEARED_MEMBERSHIP = {};
 
+const csApiBase = (client: ClientLike): string => client.session().homeserverUrl.replace(/\/+$/, "");
+
 export const rtcFocusUrl = async (homeserver: string): Promise<string> => {
   const res = await fetch(`${homeserver}/.well-known/matrix/client`);
   if (!res.ok) throw new Error(`well-known ${res.status}`);
@@ -34,9 +36,10 @@ export const rtcFocusUrl = async (homeserver: string): Promise<string> => {
 };
 
 const openIdToken = async (client: ClientLike): Promise<unknown> => {
-  const { homeserverUrl, userId } = client.session();
+  const userId = client.session().userId;
+  const base = csApiBase(client);
   const res = await fetch(
-    `${homeserverUrl}/_matrix/client/v3/user/${encodeURIComponent(userId)}/openid/request_token`,
+    `${base}/_matrix/client/v3/user/${encodeURIComponent(userId)}/openid/request_token`,
     {
       method: "POST",
       headers: {
@@ -73,10 +76,10 @@ const membershipStateKey = (userId: string, deviceId: string): string =>
   `_${userId}_${deviceId}_${RTC_APPLICATION}`;
 
 const putMembership = async (client: ClientLike, roomId: string, content: unknown): Promise<void> => {
-  const { homeserverUrl, userId, deviceId } = client.session();
+  const { userId, deviceId } = client.session();
   const stateKey = membershipStateKey(userId, deviceId);
   const res = await fetch(
-    `${homeserverUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${RTC_MEMBER_EVENT_TYPE}/${encodeURIComponent(stateKey)}`,
+    `${csApiBase(client)}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${RTC_MEMBER_EVENT_TYPE}/${encodeURIComponent(stateKey)}`,
     {
       method: "PUT",
       headers: {
