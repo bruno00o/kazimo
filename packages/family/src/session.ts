@@ -1,4 +1,11 @@
-import type { ClientLike, EventTimelineItem, RoomInfo, RoomLike } from "@unomed/react-native-matrix-sdk";
+import type {
+  ClientLike,
+  EventTimelineItem,
+  RoomInfo,
+  RoomLike,
+  SyncServiceLike,
+  TaskHandleLike,
+} from "@unomed/react-native-matrix-sdk";
 import type { MatrixHandle } from "./matrix";
 
 export type Identity = {
@@ -89,6 +96,79 @@ export const conversations = async (client: ClientLike): Promise<Conversation[]>
   const joined = client.rooms().filter((room) => room.membership() === module.Membership.Joined);
   const list = await Promise.all(joined.map((room) => describe(module, room, me)));
   return list.sort((a, b) => b.lastActive - a.lastActive);
+};
+
+export type ConversationsSubscription = { stop: () => void };
+
+const ENTRIES_PAGE_SIZE = 200;
+const COALESCE_MS = 200;
+
+export const subscribeConversations = async (
+  client: ClientLike,
+  sync: SyncServiceLike,
+  onChange: (list: Conversation[]) => void,
+): Promise<ConversationsSubscription> => {
+  const module = await sdk();
+  const watchers = new Map<string, TaskHandleLike>();
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let reading = false;
+  let queued = false;
+
+  const read = async (): Promise<void> => {
+    if (reading) {
+      queued = true;
+      return;
+    }
+    reading = true;
+    const list = await conversations(client).catch(() => null);
+    reading = false;
+    if (stopped) return;
+    if (list) onChange(list);
+    if (queued) {
+      queued = false;
+      await read();
+    }
+  };
+
+  const schedule = () => {
+    if (stopped || timer) return;
+    timer = setTimeout(() => {
+      timer = null;
+      void read();
+    }, COALESCE_MS);
+  };
+
+  const watchRooms = () => {
+    for (const room of client.rooms()) {
+      const id = room.id();
+      if (watchers.has(id)) continue;
+      watchers.set(id, room.subscribeToRoomInfoUpdates({ call: schedule }));
+    }
+  };
+
+  const rooms = await sync.roomListService().allRooms();
+  const adapters = rooms.entriesWithDynamicAdaptersWith(ENTRIES_PAGE_SIZE, true, {
+    onUpdate: () => {
+      watchRooms();
+      schedule();
+    },
+  });
+  const entries = adapters.entriesStream();
+  adapters.controller().setFilter(new module.RoomListEntriesDynamicFilterKind.NonLeft());
+
+  watchRooms();
+  await read();
+
+  return {
+    stop() {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      entries.cancel();
+      for (const watcher of watchers.values()) watcher.cancel();
+      watchers.clear();
+    },
+  };
 };
 
 export const conversationFor = async (client: ClientLike, roomId: string): Promise<Conversation | null> => {
