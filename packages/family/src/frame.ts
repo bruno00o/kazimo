@@ -173,7 +173,7 @@ export const promoteAdmin = async (
 ): Promise<void> => {
   const room = client.getRoom(controlRoomId);
   if (!room) throw new Error("control room unavailable");
-  await room.inviteUserById(userId).catch(() => undefined);
+  await room.inviteUserById(userId).catch((error) => console.error("control invite failed", error));
   await room.updatePowerLevelsForUsers([{ userId, powerLevel: BigInt(CONTROL_ADMIN_POWER_LEVEL) }]);
 };
 

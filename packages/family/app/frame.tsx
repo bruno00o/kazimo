@@ -159,7 +159,10 @@ export default function FrameAdmin() {
           setPending(true);
           void promoteAdmin(client, controlRoomId, userId)
             .then(() => setAdminId(""))
-            .catch(() => setFailure(t.framePromoteFailed))
+            .catch((error) => {
+              console.error("promote failed", error);
+              setFailure(t.framePromoteFailed);
+            })
             .finally(() => setPending(false));
         },
       },
