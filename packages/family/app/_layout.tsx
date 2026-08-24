@@ -20,6 +20,7 @@ export default function RootLayout() {
             <Stack.Screen name="index" />
             <Stack.Screen name="new" options={{ presentation: "modal" }} />
             <Stack.Screen name="pair" options={{ presentation: "modal" }} />
+            <Stack.Screen name="frame" options={{ presentation: "modal" }} />
             <Stack.Screen
               name="call/[roomId]"
               options={{ presentation: "fullScreenModal", animation: "fade" }}

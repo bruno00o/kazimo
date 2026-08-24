@@ -19,6 +19,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { linkFrame } from "../src/frame";
 import { Icon } from "../src/Icon";
 import { appStrings } from "../src/i18n";
 import { isPairingCode, type PairingStage, parsePairingQr, runPairing } from "../src/pairing";
@@ -75,6 +76,7 @@ export default function PairFrame() {
       void runPairing(client, frameUserId, pairingCode, (stage) => {
         if (alive.current) setPhase({ kind: "pairing", stage });
       }).then((outcome) => {
+        if (outcome.ok) void linkFrame(client, { frameUserId, controlRoomId: outcome.controlRoomId });
         if (!alive.current) return;
         scanned.current = null;
         setPhase(outcome.ok ? { kind: "done" } : FORM);
@@ -124,7 +126,7 @@ export default function PairFrame() {
         <Pressable
           style={[styles.button, styles.buttonWide]}
           accessibilityRole="button"
-          onPress={() => router.replace("/")}
+          onPress={() => router.replace("/frame")}
         >
           <Text style={styles.buttonText}>{t.ok}</Text>
         </Pressable>

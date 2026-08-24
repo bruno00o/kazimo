@@ -25,6 +25,8 @@ const catalog = {
   qr: { ios: "qrcode.viewfinder", android: "qr_code_scanner" },
   frame: { ios: "photo.fill.on.rectangle.fill", android: "wallpaper" },
   add: { ios: "plus", android: "add" },
+  remove: { ios: "trash.fill", android: "delete" },
+  admin: { ios: "person.badge.plus.fill", android: "person_add" },
   group: { ios: "person.2.fill", android: "group" },
   signOut: { ios: "rectangle.portrait.and.arrow.right", android: "logout" },
   leave: { ios: "rectangle.portrait.and.arrow.right", android: "logout" },

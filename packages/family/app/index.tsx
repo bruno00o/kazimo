@@ -8,6 +8,7 @@ import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSw
 import ReanimatedSwipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ContextMenu, hasNativeContextMenu, type MenuAction, openActionsAlert } from "../src/ContextMenu";
+import { frameLink } from "../src/frame";
 import { Icon } from "../src/Icon";
 import { appStrings } from "../src/i18n";
 import {
@@ -154,6 +155,7 @@ export default function Home() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [list, setList] = useState<Conversation[]>([]);
+  const [controlRoomId, setControlRoomId] = useState<string | null>(null);
 
   const refreshList = useCallback(() => {
     void conversations(client)
@@ -242,7 +244,21 @@ export default function Home() {
     };
   }, [client, sync]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void frameLink(client)
+      .then((link) => {
+        if (!cancelled) setControlRoomId(link?.controlRoomId ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
+
   useFocusEffect(refreshList);
+
+  const visible = controlRoomId ? list.filter((conversation) => conversation.id !== controlRoomId) : list;
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
@@ -259,8 +275,8 @@ export default function Home() {
         <Pressable
           style={styles.headerButton}
           accessibilityRole="button"
-          accessibilityLabel={t.pairTitle}
-          onPress={() => router.push("/pair")}
+          accessibilityLabel={t.frameTitle}
+          onPress={() => router.push("/frame")}
         >
           <Icon name="frame" color={tokens.color.blue} />
         </Pressable>
@@ -274,7 +290,7 @@ export default function Home() {
         </Pressable>
       </View>
       <FlashList
-        data={list}
+        data={visible}
         keyExtractor={(conversation) => conversation.id}
         contentContainerStyle={styles.list}
         ListEmptyComponent={<Text style={styles.empty}>{t.noConversations}</Text>}

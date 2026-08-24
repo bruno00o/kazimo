@@ -14,6 +14,26 @@ export interface Strings {
   pairDone: string;
   pairDoneBody: string;
   pairFailed: string;
+  frameTitle: string;
+  frameLinkedTo: string;
+  frameLoading: string;
+  frameLoadFailed: string;
+  frameContacts: string;
+  frameContactsBody: string;
+  frameNoContacts: string;
+  frameName: string;
+  frameNamePlaceholder: string;
+  frameAddContact: string;
+  frameAddFailed: string;
+  frameRemoveContact: string;
+  frameRemoveFailed: string;
+  frameRemoveConfirmBody: string;
+  frameRemove: string;
+  frameAdmins: string;
+  frameAdminsBody: string;
+  framePromote: string;
+  framePromoteConfirmBody: string;
+  framePromoteFailed: string;
   newConversation: string;
   newDirect: string;
   newGroup: string;
@@ -105,6 +125,26 @@ const en: Strings = {
   pairDone: "Frame paired",
   pairDoneBody: "You are now the administrator of this frame.",
   pairFailed: "The frame did not accept the code. Check it and try again.",
+  frameTitle: "Frame",
+  frameLinkedTo: "Linked frame",
+  frameLoading: "Loading the frame",
+  frameLoadFailed: "The frame contacts could not be loaded.",
+  frameContacts: "Contacts",
+  frameContactsBody: "The frame shows these people and calls them.",
+  frameNoContacts: "No contacts yet",
+  frameName: "Name shown on the frame",
+  frameNamePlaceholder: "Maria",
+  frameAddContact: "Add the contact",
+  frameAddFailed: "The contact could not be added.",
+  frameRemoveContact: "Remove the contact",
+  frameRemoveFailed: "The contact could not be removed.",
+  frameRemoveConfirmBody: "The frame will no longer show this person.",
+  frameRemove: "Remove",
+  frameAdmins: "Administrators",
+  frameAdminsBody: "An administrator can manage the contacts of this frame.",
+  framePromote: "Make administrator",
+  framePromoteConfirmBody: "This person will be able to manage the contacts of the frame.",
+  framePromoteFailed: "This person could not be made administrator.",
   newConversation: "New conversation",
   newDirect: "New message",
   newGroup: "New group",
@@ -195,6 +235,26 @@ const fr: Strings = {
   pairDone: "Cadre jumelé",
   pairDoneBody: "Vous êtes maintenant l'administrateur de ce cadre.",
   pairFailed: "Le cadre n'a pas accepté le code. Vérifiez-le et réessayez.",
+  frameTitle: "Cadre",
+  frameLinkedTo: "Cadre jumelé",
+  frameLoading: "Chargement du cadre",
+  frameLoadFailed: "Les contacts du cadre n'ont pas pu être chargés.",
+  frameContacts: "Contacts",
+  frameContactsBody: "Le cadre affiche ces personnes et les appelle.",
+  frameNoContacts: "Pas encore de contact",
+  frameName: "Nom affiché sur le cadre",
+  frameNamePlaceholder: "Maria",
+  frameAddContact: "Ajouter le contact",
+  frameAddFailed: "Le contact n'a pas pu être ajouté.",
+  frameRemoveContact: "Retirer le contact",
+  frameRemoveFailed: "Le contact n'a pas pu être retiré.",
+  frameRemoveConfirmBody: "Le cadre n'affichera plus cette personne.",
+  frameRemove: "Retirer",
+  frameAdmins: "Administrateurs",
+  frameAdminsBody: "Un administrateur peut gérer les contacts de ce cadre.",
+  framePromote: "Nommer administrateur",
+  framePromoteConfirmBody: "Cette personne pourra gérer les contacts du cadre.",
+  framePromoteFailed: "Cette personne n'a pas pu être nommée administrateur.",
   newConversation: "Nouvelle conversation",
   newDirect: "Nouveau message",
   newGroup: "Nouveau groupe",
@@ -287,6 +347,26 @@ const ptPT: Strings = {
   pairDone: "Moldura emparelhada",
   pairDoneBody: "És agora o administrador desta moldura.",
   pairFailed: "A moldura não aceitou o código. Verifica-o e tenta novamente.",
+  frameTitle: "Moldura",
+  frameLinkedTo: "Moldura emparelhada",
+  frameLoading: "A carregar a moldura",
+  frameLoadFailed: "Não foi possível carregar os contactos da moldura.",
+  frameContacts: "Contactos",
+  frameContactsBody: "A moldura mostra estas pessoas e liga-lhes.",
+  frameNoContacts: "Ainda sem contactos",
+  frameName: "Nome mostrado na moldura",
+  frameNamePlaceholder: "Maria",
+  frameAddContact: "Adicionar o contacto",
+  frameAddFailed: "Não foi possível adicionar o contacto.",
+  frameRemoveContact: "Remover o contacto",
+  frameRemoveFailed: "Não foi possível remover o contacto.",
+  frameRemoveConfirmBody: "A moldura deixa de mostrar esta pessoa.",
+  frameRemove: "Remover",
+  frameAdmins: "Administradores",
+  frameAdminsBody: "Um administrador pode gerir os contactos desta moldura.",
+  framePromote: "Tornar administrador",
+  framePromoteConfirmBody: "Esta pessoa passa a poder gerir os contactos da moldura.",
+  framePromoteFailed: "Não foi possível tornar esta pessoa administrador.",
   newConversation: "Nova conversa",
   newDirect: "Nova mensagem",
   newGroup: "Novo grupo",
@@ -378,6 +458,26 @@ const es: Strings = {
   pairDone: "Marco emparejado",
   pairDoneBody: "Ahora eres el administrador de este marco.",
   pairFailed: "El marco no aceptó el código. Compruébalo e inténtalo de nuevo.",
+  frameTitle: "Marco",
+  frameLinkedTo: "Marco emparejado",
+  frameLoading: "Cargando el marco",
+  frameLoadFailed: "No se pudieron cargar los contactos del marco.",
+  frameContacts: "Contactos",
+  frameContactsBody: "El marco muestra a estas personas y las llama.",
+  frameNoContacts: "Aún no hay contactos",
+  frameName: "Nombre mostrado en el marco",
+  frameNamePlaceholder: "Maria",
+  frameAddContact: "Añadir el contacto",
+  frameAddFailed: "No se pudo añadir el contacto.",
+  frameRemoveContact: "Quitar el contacto",
+  frameRemoveFailed: "No se pudo quitar el contacto.",
+  frameRemoveConfirmBody: "El marco dejará de mostrar a esta persona.",
+  frameRemove: "Quitar",
+  frameAdmins: "Administradores",
+  frameAdminsBody: "Un administrador puede gestionar los contactos de este marco.",
+  framePromote: "Hacer administrador",
+  framePromoteConfirmBody: "Esta persona podrá gestionar los contactos del marco.",
+  framePromoteFailed: "No se pudo hacer administrador a esta persona.",
   newConversation: "Nueva conversación",
   newDirect: "Nuevo mensaje",
   newGroup: "Nuevo grupo",
