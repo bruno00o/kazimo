@@ -41,6 +41,12 @@
           "photosPermission": "Kazimo uses your photos to send them to your family.",
           "cameraPermission": "Kazimo uses the camera for video calls and photos."
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Kazimo uses the camera for video calls and to scan the frame pairing code."
+        }
       ]
     ]
   }
