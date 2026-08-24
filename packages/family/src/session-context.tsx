@@ -1,5 +1,5 @@
 import { tokens } from "@kazimo/shared";
-import type { ClientLike } from "@unomed/react-native-matrix-sdk";
+import type { ClientLike, SyncServiceLike } from "@unomed/react-native-matrix-sdk";
 import { useRouter } from "expo-router";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
@@ -17,6 +17,7 @@ import {
   assessSecurity,
   backupExistsOnServerRaw,
   clearSecurityDone,
+  isRecoveryEnabled,
   isSecurityDone,
   markSecurityDone,
   SECURITY_READY,
@@ -34,6 +35,7 @@ const LOGOUT_ERROR_NAME = "TokenRefreshLogoutError";
 
 type Session = {
   client: ClientLike;
+  sync: SyncServiceLike;
   homeserver: string;
   identity: Identity;
   center: CallCenter | null;
@@ -148,7 +150,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           return;
         }
         const alreadyDone = await isSecurityDone().catch(() => false);
-        const security = alreadyDone
+        const recovered = alreadyDone
+          ? await isRecoveryEnabled(connected.handle.client).catch(() => true)
+          : false;
+        const security = recovered
           ? SECURITY_READY
           : await assessSecurity(connected.handle.client).catch(() => SECURITY_READY);
         if (cancelled) {
@@ -231,6 +236,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     <SessionContext.Provider
       value={{
         client: phase.connected.handle.client,
+        sync: phase.connected.handle.sync,
         homeserver: phase.connected.homeserver,
         identity: phase.connected.identity,
         center,

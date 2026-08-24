@@ -50,6 +50,12 @@ export const assessSecurity = async (client: ClientLike): Promise<Security> => {
   return { state: "showKey", recoveryKey };
 };
 
+export const isRecoveryEnabled = async (client: ClientLike): Promise<boolean> => {
+  const encryption = client.encryption();
+  await encryption.waitForE2eeInitializationTasks();
+  return encryption.recoveryState() === RECOVERY_ENABLED;
+};
+
 export const submitRecoveryKey = async (client: ClientLike, key: string): Promise<boolean> => {
   try {
     await client.encryption().recover(key.trim());
