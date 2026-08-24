@@ -1,5 +1,15 @@
 export { A2UI_ICONS, type A2uiIcon, type A2uiNode } from "./a2ui";
 export {
+  CONTACT_EVENT_TYPE,
+  CONTROL_ADMIN_POWER_LEVEL,
+  CONTROL_EVENT_TYPE,
+  type ContactContent,
+  contactOf,
+  contactStateKeyOf,
+  contactUserIdOf,
+  type FrameContact,
+} from "./control";
+export {
   codesMatch,
   formatPairingCode,
   normalizePairingCode,

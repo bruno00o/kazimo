@@ -1,26 +1,32 @@
-import type {
-  A2uiNode,
-  ActivitySummary,
-  Announcement,
-  Contact,
-  HistoryMessage,
-  KioskConfig,
-  KioskState,
-  Person,
-  PhotoRef,
-  PhotosResult,
+import {
+  type A2uiNode,
+  type ActivitySummary,
+  type Announcement,
+  CONTACT_EVENT_TYPE,
+  CONTROL_ADMIN_POWER_LEVEL,
+  CONTROL_EVENT_TYPE,
+  type Contact,
+  codesMatch,
+  type FrameContact,
+  type HistoryMessage,
+  type KioskConfig,
+  type KioskState,
+  type Person,
+  type PhotoRef,
+  type PhotosResult,
 } from "@kazimo/shared";
-import { codesMatch } from "@kazimo/shared";
 import { initAsync as initCryptoWasm } from "@matrix-org/matrix-sdk-crypto-wasm";
 import {
   ClientEvent,
   createClient,
+  EventType,
   type MatrixClient,
   type MatrixEvent,
   Preset,
   type Room,
   RoomEvent,
   RoomStateEvent,
+  type StateEvents,
   Visibility,
 } from "matrix-js-sdk";
 import {
@@ -35,6 +41,16 @@ import {
 import { isNightAt } from "../night";
 import { playConnected, playEnded, playMessage, startRinging, stopRinging } from "../sounds";
 import { CallHost, type CallIntent, RTC_MEMBER_TYPES } from "./call";
+import {
+  type ContactStateEntry,
+  contactsToProvision,
+  desiredContacts,
+  directRoomsByPeer,
+  displayNameOf,
+  type RoomView,
+  removedContacts,
+  repairedPowerLevels,
+} from "./contacts";
 import { ensureCryptoIdentity, secretStorageCallbacks } from "./crypto";
 import { plainMediaUrl } from "./media";
 import { captionOf, loadRecentPhotos, photoFromEvent } from "./photos";
@@ -47,9 +63,10 @@ const RELOAD_AFTER_FAILURES = 5;
 const NIGHT_CHECK_MS = 30_000;
 const RING_TIMEOUT_MS = 90_000;
 const UNREAD_BODY_MAX_CHARS = 200;
-const CONTROL_EVENT_TYPE = "dev.kazimo.control";
 const CONTROL_ROOM_NAME = "Kazimo";
-const CONTROL_POWER_LEVEL = 100;
+const RTC_MEMBER_POWER_LEVEL = 0;
+const RECONCILE_DEBOUNCE_MS = 500;
+const ENCRYPTION_ALGORITHM = "m.megolm.v1.aes-sha2";
 const PAIRING_PREFIX = "kazimo-pair ";
 const PAIRING_DONE_PREFIX = "kazimo-paired ";
 const PAIRING_FAILED = "kazimo-pair-failed";
@@ -174,6 +191,8 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
     let night = isNightAt(new Date(), config.nightStartHour, config.nightEndHour);
     let ringing: { roomId: string; sender: string; caller: Person } | null = null;
     let controlRoomId: string | null = null;
+    let namedContacts = new Map<string, FrameContact>();
+    let hiddenContacts = new Set<string>();
 
     const findControlRoom = () =>
       joinedRooms().find((room) => room.currentState.getStateEvents(CONTROL_EVENT_TYPE, "") !== null)
@@ -185,12 +204,30 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       callbacks.reportPaired(controlRoomId !== null);
     };
 
+    const contactStateEntries = (): ContactStateEntry[] => {
+      const room = controlRoomId ? matrix.getRoom(controlRoomId) : null;
+      if (!room) return [];
+      return room.currentState.getStateEvents(CONTACT_EVENT_TYPE).map((event) => ({
+        stateKey: event.getStateKey() ?? "",
+        content: event.getContent(),
+      }));
+    };
+
+    const refreshNamedContacts = () => {
+      const entries = contactStateEntries();
+      namedContacts = desiredContacts(entries);
+      hiddenContacts = removedContacts(entries);
+    };
+
+    const nameOf = (userId: string, fallback: string) => displayNameOf(namedContacts, userId, fallback);
+
     const createControlRoom = async () => {
       const created = await matrix.createRoom({
         preset: Preset.TrustedPrivateChat,
         visibility: Visibility.Private,
         name: CONTROL_ROOM_NAME,
         initial_state: [{ type: CONTROL_EVENT_TYPE, state_key: "", content: {} }],
+        power_level_content_override: { events: { [CONTACT_EVENT_TYPE]: CONTROL_ADMIN_POWER_LEVEL } },
       });
       return created.room_id;
     };
@@ -211,9 +248,10 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       setControlRoom(roomId);
       await matrix.invite(roomId, sender).catch((error) => console.error("control invite failed", error));
       await matrix
-        .setPowerLevel(roomId, sender, CONTROL_POWER_LEVEL)
+        .setPowerLevel(roomId, sender, CONTROL_ADMIN_POWER_LEVEL)
         .catch((error) => console.error("control power level failed", error));
       await reply(`${PAIRING_DONE_PREFIX}${roomId}`);
+      scheduleReconcile();
     };
 
     const isNightNow = () => isNightAt(new Date(), config.nightStartHour, config.nightEndHour);
@@ -259,7 +297,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       const mxc = member?.getMxcAvatarUrl();
       return {
         userId,
-        displayName: member?.name ?? userId,
+        displayName: nameOf(userId, member?.name ?? userId),
         avatarUrl: mxc ? await plainMediaUrl(matrix, mxc) : null,
       };
     };
@@ -404,7 +442,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
         await matrix.decryptEventIfNeeded(event);
         if (event.getType() !== "m.room.message") continue;
         const content = event.getContent();
-        const from = room.getMember(sender)?.name ?? sender;
+        const from = nameOf(sender, room.getMember(sender)?.name ?? sender);
         if (content.msgtype === "m.text") {
           messages.push({
             from,
@@ -453,7 +491,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
         setActivity(
           withUnread(activity, {
             userId: sender,
-            from: room.getMember(sender)?.name ?? sender,
+            from: nameOf(sender, room.getMember(sender)?.name ?? sender),
             kind,
             body: body ? body.slice(0, UNREAD_BODY_MAX_CHARS) : null,
             timestamp: Date.now(),
@@ -495,17 +533,22 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
 
     let lastContacts = "";
     const reportContacts = () => {
+      refreshNamedContacts();
       const byUser = new Map<string, { contact: Contact; lastActive: number }>();
       for (const room of joinedRooms()) {
         const members = room.getJoinedMembers();
         if (members.length !== 2) continue;
         const other = members.find((member) => member.userId !== config.userId);
-        if (!other) continue;
+        if (!other || hiddenContacts.has(other.userId)) continue;
         const lastActive = room.getLastActiveTimestamp();
         const known = byUser.get(other.userId);
         if (known && known.lastActive >= lastActive) continue;
         byUser.set(other.userId, {
-          contact: { userId: other.userId, displayName: other.name, roomId: room.roomId },
+          contact: {
+            userId: other.userId,
+            displayName: nameOf(other.userId, other.name),
+            roomId: room.roomId,
+          },
           lastActive,
         });
       }
@@ -514,6 +557,99 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       if (encoded === lastContacts) return;
       lastContacts = encoded;
       callbacks.reportContacts(snapshot);
+    };
+
+    const roomViews = (): RoomView[] =>
+      joinedRooms().map((room) => ({
+        roomId: room.roomId,
+        isControl: room.currentState.getStateEvents(CONTROL_EVENT_TYPE, "") !== null,
+        memberIds: room
+          .getMembers()
+          .filter((member) => member.membership === "join" || member.membership === "invite")
+          .map((member) => member.userId),
+      }));
+
+    const repairControlPowerLevels = async () => {
+      const room = controlRoomId ? matrix.getRoom(controlRoomId) : null;
+      const current = room?.currentState.getStateEvents(EventType.RoomPowerLevels, "");
+      if (!room || !current) return;
+      const repaired = repairedPowerLevels(current.getContent());
+      if (!repaired) return;
+      await matrix
+        .sendStateEvent(
+          room.roomId,
+          EventType.RoomPowerLevels,
+          repaired as StateEvents[EventType.RoomPowerLevels],
+        )
+        .catch((error) => console.error("control power levels repair failed", error));
+    };
+
+    const createContactRoom = (contact: FrameContact) =>
+      matrix.createRoom({
+        preset: Preset.TrustedPrivateChat,
+        visibility: Visibility.Private,
+        is_direct: true,
+        invite: [contact.userId],
+        initial_state: [
+          { type: EventType.RoomEncryption, state_key: "", content: { algorithm: ENCRYPTION_ALGORITHM } },
+        ],
+        power_level_content_override: {
+          users: {
+            [config.userId]: CONTROL_ADMIN_POWER_LEVEL,
+            [contact.userId]: CONTROL_ADMIN_POWER_LEVEL,
+          },
+          events: Object.fromEntries([...RTC_MEMBER_TYPES].map((type) => [type, RTC_MEMBER_POWER_LEVEL])),
+        },
+      });
+
+    const provisionedRooms = new Map<string, string>();
+    let reconciling = false;
+    let reconcileRequested = false;
+
+    const provision = async (contact: FrameContact) => {
+      try {
+        await matrix.getProfileInfo(contact.userId);
+        const created = await createContactRoom(contact);
+        provisionedRooms.set(contact.userId, created.room_id);
+      } catch (error) {
+        console.error(`contact provisioning failed for ${contact.userId}`, error);
+      }
+    };
+
+    const reconcileContacts = async () => {
+      if (reconciling) {
+        reconcileRequested = true;
+        return;
+      }
+      reconciling = true;
+      try {
+        do {
+          reconcileRequested = false;
+          refreshNamedContacts();
+          await repairControlPowerLevels();
+          const existing = directRoomsByPeer(roomViews(), config.userId);
+          for (const [userId, roomId] of provisionedRooms) {
+            if (!existing.has(userId)) existing.set(userId, roomId);
+          }
+          for (const contact of contactsToProvision(namedContacts, existing)) {
+            if (stopped) return;
+            await provision(contact);
+          }
+          reportContacts();
+        } while (reconcileRequested && !stopped);
+      } finally {
+        reconciling = false;
+      }
+    };
+
+    let reconcileScheduled = false;
+    const scheduleReconcile = () => {
+      if (reconcileScheduled) return;
+      reconcileScheduled = true;
+      later(() => {
+        reconcileScheduled = false;
+        void reconcileContacts();
+      }, RECONCILE_DEBOUNCE_MS);
     };
 
     matrix.on(RoomStateEvent.Members, () => {
@@ -529,7 +665,12 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
     });
 
     matrix.on(RoomStateEvent.Events, (event: MatrixEvent) => {
-      if (stopped || !RTC_MEMBER_TYPES.has(event.getType())) return;
+      if (stopped) return;
+      if (event.getType() === CONTACT_EVENT_TYPE) {
+        if (event.getRoomId() === controlRoomId) scheduleReconcile();
+        return;
+      }
+      if (!RTC_MEMBER_TYPES.has(event.getType())) return;
       const active = Object.keys(event.getContent()).length > 0;
       const sender = event.getSender();
       if (!sender || sender === config.userId) return;
@@ -569,7 +710,10 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
           addPhotos(await loadRecentPhotos(matrix, joined));
           if (stopped) return;
           const found = findControlRoom();
-          if (found) setControlRoom(found);
+          if (found) {
+            setControlRoom(found);
+            scheduleReconcile();
+          }
           reportContacts();
           if (mode === "idle") showIdle();
         })
@@ -599,6 +743,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
     callbacks.reportPaired(controlRoomId !== null);
     reportContacts();
     showIdle();
+    if (controlRoomId) void reconcileContacts();
 
     const ongoing = ongoingCall();
     if (ongoing) void ring(ongoing.room, ongoing.sender);
