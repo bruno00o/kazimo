@@ -298,7 +298,7 @@ export const signIn = async (homeserverInput: string): Promise<StoredSession> =>
     codeChallengeMethod: CodeChallengeMethod.S256,
     usePKCE: true,
   });
-  const result = await request.promptAsync(discovery);
+  const result = await request.promptAsync(discovery, { preferEphemeralSession: true });
   if (result.type === "error") throw result.error ?? new Error(result.errorCode ?? "authorization failed");
   if (result.type !== "success") throw new SignInCancelledError();
   const code = result.params.code;
