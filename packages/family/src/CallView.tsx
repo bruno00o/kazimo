@@ -1,17 +1,29 @@
 import { tokens } from "@kazimo/shared";
+import type { TrackReference } from "@livekit/components-react";
 import {
   useConnectionState,
   useLocalParticipant,
+  useParticipants,
   useRoomContext,
+  useSpeakingParticipants,
   useTracks,
 } from "@livekit/components-react";
 import type { AppleAudioCategoryOption, AppleAudioConfiguration } from "@livekit/react-native";
 import { AudioSession, LiveKitRoom, VideoTrack } from "@livekit/react-native";
 import type { ClientLike } from "@unomed/react-native-matrix-sdk";
-import { ConnectionState, Room, Track } from "livekit-client";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { ConnectionState, type Participant, Room, Track } from "livekit-client";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { joinRtc, leaveRtc, rtcFocusUrl, type SfuToken, sfuToken } from "./call";
+import { GRID_GAP, gridFor, visibleRemoteCount } from "./callLayout";
 import { Icon, type IconName } from "./Icon";
 import type { Strings } from "./i18n";
 
@@ -78,6 +90,8 @@ const nextVideoDevice = (
     : undefined;
   return opposite ?? devices.find((device) => device.deviceId !== active.deviceId);
 };
+
+const participantName = (participant: Participant): string => participant.name || participant.identity;
 
 export function CallView({
   client,
@@ -178,9 +192,31 @@ function Stage({
   const room = useRoomContext();
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant();
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
+  const participants = useParticipants();
+  const speaking = useSpeakingParticipants();
+  const { width, height } = useWindowDimensions();
   const remote = tracks.find((track) => !track.participant.isLocal && !track.publication.isMuted);
   const local = tracks.find((track) => track.participant.isLocal);
   const connected = state === ConnectionState.Connected;
+
+  const remotes = useMemo(() => participants.filter((participant) => !participant.isLocal), [participants]);
+  const grouped = remotes.length > 1;
+  const tiles = useMemo(() => {
+    if (!grouped) return [];
+    return [...remotes.slice(0, visibleRemoteCount(remotes.length)), localParticipant];
+  }, [grouped, remotes, localParticipant]);
+  const grid = gridFor(tiles.length, width, height);
+  const speakingIdentities = useMemo(
+    () => new Set(speaking.map((participant) => participant.identity)),
+    [speaking],
+  );
+  const cameraTrack = useCallback(
+    (participant: Participant): TrackReference | undefined =>
+      tracks.find(
+        (track) => track.participant.identity === participant.identity && !track.publication.isMuted,
+      ),
+    [tracks],
+  );
 
   const [speakerOn, setSpeakerOn] = useState(initialVideo);
   const [videoDevices, setVideoDevices] = useState<VideoInputDevice[]>([]);
@@ -230,7 +266,21 @@ function Stage({
 
   return (
     <View style={styles.stage}>
-      {remote ? (
+      {grouped ? (
+        <View style={styles.grid}>
+          {tiles.map((participant) => (
+            <Tile
+              key={participant.identity}
+              name={participantName(participant)}
+              trackRef={cameraTrack(participant)}
+              mirror={participant.isLocal}
+              speaking={speakingIdentities.has(participant.identity)}
+              width={grid.tileWidth}
+              height={grid.tileHeight}
+            />
+          ))}
+        </View>
+      ) : remote ? (
         <VideoTrack trackRef={remote} objectFit="cover" style={styles.remote} />
       ) : (
         <View style={styles.waiting}>
@@ -243,7 +293,7 @@ function Stage({
         {!connected && <Text style={styles.stateText}>{stateLabel(strings)[state]}</Text>}
       </View>
 
-      {isCameraEnabled && local && (
+      {!grouped && isCameraEnabled && local && (
         <View style={styles.self}>
           <VideoTrack trackRef={local} objectFit="cover" mirror zOrder={1} style={styles.selfVideo} />
         </View>
@@ -270,6 +320,43 @@ function Stage({
         )}
         <HangUp label={strings.hangUp} onLeave={onLeave} />
       </View>
+    </View>
+  );
+}
+
+function Tile({
+  name,
+  trackRef,
+  mirror,
+  speaking,
+  width,
+  height,
+}: {
+  name: string;
+  trackRef: TrackReference | undefined;
+  mirror: boolean;
+  speaking: boolean;
+  width: number;
+  height: number;
+}) {
+  return (
+    <View style={[styles.tile, { width, height }, speaking && styles.tileSpeaking]}>
+      {trackRef ? (
+        <>
+          <VideoTrack trackRef={trackRef} objectFit="cover" mirror={mirror} style={styles.tileVideo} />
+          <View style={styles.tileLabel}>
+            <Text numberOfLines={1} style={styles.tileLabelText}>
+              {name}
+            </Text>
+          </View>
+        </>
+      ) : (
+        <View style={styles.tileQuiet}>
+          <Text numberOfLines={2} style={styles.tileQuietName}>
+            {name}
+          </Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -344,6 +431,60 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+  },
+  grid: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignContent: "center",
+    justifyContent: "center",
+    gap: GRID_GAP,
+    padding: GRID_GAP,
+  },
+  tile: {
+    borderRadius: 20,
+    overflow: "hidden",
+    backgroundColor: "#000000",
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  tileSpeaking: {
+    borderColor: tokens.color.blue,
+  },
+  tileVideo: {
+    flex: 1,
+  },
+  tileLabel: {
+    position: "absolute",
+    bottom: 8,
+    left: 8,
+    maxWidth: "80%",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: "rgba(0, 0, 0, 0.55)",
+  },
+  tileLabelText: {
+    fontSize: 13,
+    fontWeight: "500",
+    color: "#ffffff",
+  },
+  tileQuiet: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 10,
+    backgroundColor: tokens.theme.dark.ground,
+  },
+  tileQuietName: {
+    fontSize: 18,
+    fontWeight: "600",
+    textAlign: "center",
+    color: tokens.theme.dark.ink,
   },
   waiting: {
     position: "absolute",
