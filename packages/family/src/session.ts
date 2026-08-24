@@ -45,6 +45,20 @@ export const whoami = async (homeserver: string, token: string): Promise<Identit
   return { userId: body.user_id, deviceId: body.device_id ?? "" };
 };
 
+export const setDeviceName = async (
+  homeserver: string,
+  token: string,
+  deviceId: string,
+  name: string,
+): Promise<void> => {
+  const res = await fetch(`${homeserver}/_matrix/client/v3/devices/${encodeURIComponent(deviceId)}`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ display_name: name }),
+  });
+  if (!res.ok) throw new Error(`device rename ${res.status}`);
+};
+
 export const acceptInvites = async (client: ClientLike): Promise<void> => {
   const { Membership } = await sdk();
   const invited = client.rooms().filter((room) => room.membership() === Membership.Invited);

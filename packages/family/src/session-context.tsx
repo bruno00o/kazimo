@@ -27,7 +27,7 @@ import { readEnv } from "./env";
 import { appStrings } from "./i18n";
 import { type MatrixHandle, startMatrix } from "./matrix";
 import { SecurityGate } from "./SecurityGate";
-import { acceptInvites, endSession, type Identity, whoami } from "./session";
+import { acceptInvites, endSession, type Identity, setDeviceName, whoami } from "./session";
 
 const t = appStrings();
 
@@ -69,6 +69,8 @@ type Phase =
   | { kind: "ready"; connected: Connected; security: Security }
   | { kind: "error"; message: string };
 
+const DEVICE_DISPLAY_NAME = "Kazimo";
+
 const credentialsOf = (stored: StoredSession | null): Credentials | null => {
   if (stored) return { kind: "stored", session: stored };
   const env = readEnv();
@@ -77,6 +79,8 @@ const credentialsOf = (stored: StoredSession | null): Credentials | null => {
 
 const open = async (homeserver: string, token: string, stored: StoredSession | null): Promise<Connected> => {
   const identity = await whoami(homeserver, token);
+  if (identity.deviceId)
+    void setDeviceName(homeserver, token, identity.deviceId, DEVICE_DISPLAY_NAME).catch(() => undefined);
   const backupOnServer = await backupExistsOnServerRaw(homeserver, token).catch(() => true);
   const handle = await startMatrix(
     {
