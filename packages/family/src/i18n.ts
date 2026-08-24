@@ -1,6 +1,29 @@
 import { getLocales } from "expo-localization";
 
 export interface Strings {
+  pairTitle: string;
+  pairBody: string;
+  pairScan: string;
+  pairManual: string;
+  pairFrameId: string;
+  pairFrameIdPlaceholder: string;
+  pairCode: string;
+  pairCodePlaceholder: string;
+  pairAction: string;
+  pairWaiting: string;
+  pairDone: string;
+  pairDoneBody: string;
+  pairFailed: string;
+  newConversation: string;
+  newDirect: string;
+  newGroup: string;
+  matrixId: string;
+  matrixIdPlaceholder: string;
+  groupName: string;
+  groupNamePlaceholder: string;
+  addMember: string;
+  create: string;
+  createFailed: string;
   locale: string;
   syncing: string;
   tokenMissing: string;
@@ -69,6 +92,29 @@ export interface Strings {
 
 const en: Strings = {
   locale: "en-GB",
+  pairTitle: "Add a frame",
+  pairBody: "Scan the QR code shown on the Kazimo frame, or enter its code manually.",
+  pairScan: "Scan the code",
+  pairManual: "Enter manually",
+  pairFrameId: "Frame ID",
+  pairFrameIdPlaceholder: "@frame:server",
+  pairCode: "Pairing code",
+  pairCodePlaceholder: "xxxx-xxxx",
+  pairAction: "Pair",
+  pairWaiting: "Waiting for the frame",
+  pairDone: "Frame paired",
+  pairDoneBody: "You are now the administrator of this frame.",
+  pairFailed: "The frame did not accept the code. Check it and try again.",
+  newConversation: "New conversation",
+  newDirect: "New message",
+  newGroup: "New group",
+  matrixId: "Matrix ID",
+  matrixIdPlaceholder: "@name:server",
+  groupName: "Group name",
+  groupNamePlaceholder: "Family",
+  addMember: "Add a member",
+  create: "Create",
+  createFailed: "The conversation could not be created.",
   syncing: "Syncing",
   tokenMissing: "Token missing.",
   conversations: "Conversations",
@@ -136,6 +182,29 @@ const en: Strings = {
 
 const fr: Strings = {
   locale: "fr-FR",
+  pairTitle: "Ajouter un cadre",
+  pairBody: "Scannez le QR code affiché sur le cadre Kazimo, ou saisissez son code manuellement.",
+  pairScan: "Scanner le code",
+  pairManual: "Saisir manuellement",
+  pairFrameId: "Identifiant du cadre",
+  pairFrameIdPlaceholder: "@cadre:serveur",
+  pairCode: "Code de jumelage",
+  pairCodePlaceholder: "xxxx-xxxx",
+  pairAction: "Jumeler",
+  pairWaiting: "En attente du cadre",
+  pairDone: "Cadre jumelé",
+  pairDoneBody: "Vous êtes maintenant l'administrateur de ce cadre.",
+  pairFailed: "Le cadre n'a pas accepté le code. Vérifiez-le et réessayez.",
+  newConversation: "Nouvelle conversation",
+  newDirect: "Nouveau message",
+  newGroup: "Nouveau groupe",
+  matrixId: "Identifiant Matrix",
+  matrixIdPlaceholder: "@nom:serveur",
+  groupName: "Nom du groupe",
+  groupNamePlaceholder: "Famille",
+  addMember: "Ajouter un membre",
+  create: "Créer",
+  createFailed: "La conversation n'a pas pu être créée.",
   syncing: "Synchronisation",
   tokenMissing: "Jeton manquant.",
   conversations: "Conversations",
@@ -205,6 +274,29 @@ const fr: Strings = {
 
 const ptPT: Strings = {
   locale: "pt-PT",
+  pairTitle: "Adicionar uma moldura",
+  pairBody: "Digitaliza o código QR mostrado na moldura Kazimo, ou introduz o código manualmente.",
+  pairScan: "Digitalizar o código",
+  pairManual: "Introduzir manualmente",
+  pairFrameId: "Identificador da moldura",
+  pairFrameIdPlaceholder: "@moldura:servidor",
+  pairCode: "Código de emparelhamento",
+  pairCodePlaceholder: "xxxx-xxxx",
+  pairAction: "Emparelhar",
+  pairWaiting: "À espera da moldura",
+  pairDone: "Moldura emparelhada",
+  pairDoneBody: "És agora o administrador desta moldura.",
+  pairFailed: "A moldura não aceitou o código. Verifica-o e tenta novamente.",
+  newConversation: "Nova conversa",
+  newDirect: "Nova mensagem",
+  newGroup: "Novo grupo",
+  matrixId: "Identificador Matrix",
+  matrixIdPlaceholder: "@nome:servidor",
+  groupName: "Nome do grupo",
+  groupNamePlaceholder: "Família",
+  addMember: "Adicionar um membro",
+  create: "Criar",
+  createFailed: "Não foi possível criar a conversa.",
   syncing: "A sincronizar",
   tokenMissing: "Falta o token.",
   conversations: "Conversas",
@@ -273,6 +365,29 @@ const ptPT: Strings = {
 
 const es: Strings = {
   locale: "es-ES",
+  pairTitle: "Añadir un marco",
+  pairBody: "Escanea el código QR mostrado en el marco Kazimo, o introduce su código manualmente.",
+  pairScan: "Escanear el código",
+  pairManual: "Introducir manualmente",
+  pairFrameId: "Identificador del marco",
+  pairFrameIdPlaceholder: "@marco:servidor",
+  pairCode: "Código de emparejamiento",
+  pairCodePlaceholder: "xxxx-xxxx",
+  pairAction: "Emparejar",
+  pairWaiting: "Esperando al marco",
+  pairDone: "Marco emparejado",
+  pairDoneBody: "Ahora eres el administrador de este marco.",
+  pairFailed: "El marco no aceptó el código. Compruébalo e inténtalo de nuevo.",
+  newConversation: "Nueva conversación",
+  newDirect: "Nuevo mensaje",
+  newGroup: "Nuevo grupo",
+  matrixId: "Identificador Matrix",
+  matrixIdPlaceholder: "@nombre:servidor",
+  groupName: "Nombre del grupo",
+  groupNamePlaceholder: "Familia",
+  addMember: "Añadir un miembro",
+  create: "Crear",
+  createFailed: "No se pudo crear la conversación.",
   syncing: "Sincronizando",
   tokenMissing: "Falta el token.",
   conversations: "Conversaciones",

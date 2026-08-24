@@ -17,11 +17,17 @@ const catalog = {
   speaker: { ios: "speaker.wave.2.fill", android: "volume_up" },
   lock: { ios: "lock.fill", android: "lock" },
   muted: { ios: "bell.slash.fill", android: "notifications_off" },
+  unmuted: { ios: "bell.fill", android: "notifications" },
   sent: { ios: "checkmark", android: "check" },
   read: { ios: "checkmark.circle.fill", android: "done_all" },
   attach: { ios: "photo.fill", android: "image" },
   close: { ios: "xmark", android: "close" },
+  qr: { ios: "qrcode.viewfinder", android: "qr_code_scanner" },
+  frame: { ios: "photo.fill.on.rectangle.fill", android: "wallpaper" },
+  add: { ios: "plus", android: "add" },
+  group: { ios: "person.2.fill", android: "group" },
   signOut: { ios: "rectangle.portrait.and.arrow.right", android: "logout" },
+  leave: { ios: "rectangle.portrait.and.arrow.right", android: "logout" },
 } satisfies Record<string, SymbolViewProps["name"]>;
 
 export type IconName = keyof typeof catalog;
