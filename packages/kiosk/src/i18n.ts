@@ -5,6 +5,7 @@ export interface Strings {
   degradedSubtitle: string;
   badgeHint: string;
   badgeOthers: string;
+  pairingPrompt: string;
 }
 
 const en: Strings = {
@@ -14,6 +15,7 @@ const en: Strings = {
   degradedSubtitle: "Your family has been told.",
   badgeHint: "Ask Kazimo to read them",
   badgeOthers: "and others",
+  pairingPrompt: "Scan this code with the Kazimo app",
 };
 
 const fr: Strings = {
@@ -23,6 +25,7 @@ const fr: Strings = {
   degradedSubtitle: "Ta famille a été prévenue.",
   badgeHint: "Demande à Kazimo de les lire",
   badgeOthers: "et d'autres",
+  pairingPrompt: "Scannez ce code avec l'application Kazimo",
 };
 
 const ptPT: Strings = {
@@ -32,6 +35,7 @@ const ptPT: Strings = {
   degradedSubtitle: "A tua família já foi avisada.",
   badgeHint: "Pede ao Kazimo para os ler",
   badgeOthers: "e outros",
+  pairingPrompt: "Digitaliza este código com a aplicação Kazimo",
 };
 
 const es: Strings = {
@@ -41,6 +45,7 @@ const es: Strings = {
   degradedSubtitle: "Tu familia ya está avisada.",
   badgeHint: "Pídele a Kazimo que los lea",
   badgeOthers: "y otros",
+  pairingPrompt: "Escanea este código con la aplicación Kazimo",
 };
 
 const byLang: Record<string, Strings> = { en, fr, es, pt: ptPT, "pt-PT": ptPT };

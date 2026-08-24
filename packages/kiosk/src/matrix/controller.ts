@@ -10,15 +10,18 @@ import type {
   PhotoRef,
   PhotosResult,
 } from "@kazimo/shared";
+import { codesMatch } from "@kazimo/shared";
 import { initAsync as initCryptoWasm } from "@matrix-org/matrix-sdk-crypto-wasm";
 import {
   ClientEvent,
   createClient,
   type MatrixClient,
   type MatrixEvent,
+  Preset,
   type Room,
   RoomEvent,
   RoomStateEvent,
+  Visibility,
 } from "matrix-js-sdk";
 import {
   cleared,
@@ -44,6 +47,13 @@ const RELOAD_AFTER_FAILURES = 5;
 const NIGHT_CHECK_MS = 30_000;
 const RING_TIMEOUT_MS = 90_000;
 const UNREAD_BODY_MAX_CHARS = 200;
+const CONTROL_EVENT_TYPE = "dev.kazimo.control";
+const CONTROL_ROOM_NAME = "Kazimo";
+const CONTROL_POWER_LEVEL = 100;
+const PAIRING_PREFIX = "kazimo-pair ";
+const PAIRING_DONE_PREFIX = "kazimo-paired ";
+const PAIRING_FAILED = "kazimo-pair-failed";
+const PAIRING_MAX_ATTEMPTS = 5;
 
 interface RuntimeConfig extends KioskConfig {
   accessToken: string;
@@ -56,6 +66,7 @@ export interface KioskCallbacks {
   setNight: (night: boolean) => void;
   reportActivity: (activity: ActivitySummary) => void;
   reportContacts: (contacts: Contact[]) => void;
+  reportPaired: (paired: boolean) => void;
   announce: (announcement: Announcement) => void;
 }
 
@@ -96,6 +107,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
   let sendMessageSink: ((roomId: string, text: string) => void) | null = null;
   let showPhotosSink: ((userId: string | null) => Promise<PhotosResult>) | null = null;
   let historySink: ((roomId: string, limit: number) => Promise<HistoryMessage[]>) | null = null;
+  let pairingAttempts = 0;
   const timers = new Set<ReturnType<typeof setTimeout>>();
 
   const later = (fn: () => void, ms: number) => {
@@ -161,6 +173,48 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
     const pendingReads = new Map<string, MatrixEvent>();
     let night = isNightAt(new Date(), config.nightStartHour, config.nightEndHour);
     let ringing: { roomId: string; sender: string; caller: Person } | null = null;
+    let controlRoomId: string | null = null;
+
+    const findControlRoom = () =>
+      joinedRooms().find((room) => room.currentState.getStateEvents(CONTROL_EVENT_TYPE, "") !== null)
+        ?.roomId ?? null;
+
+    const setControlRoom = (roomId: string | null) => {
+      if (roomId === controlRoomId) return;
+      controlRoomId = roomId;
+      callbacks.reportPaired(controlRoomId !== null);
+    };
+
+    const createControlRoom = async () => {
+      const created = await matrix.createRoom({
+        preset: Preset.TrustedPrivateChat,
+        visibility: Visibility.Private,
+        name: CONTROL_ROOM_NAME,
+        initial_state: [{ type: CONTROL_EVENT_TYPE, state_key: "", content: {} }],
+      });
+      return created.room_id;
+    };
+
+    const pair = async (room: Room, sender: string, attempt: string) => {
+      const reply = (text: string) =>
+        matrix
+          .sendTextMessage(room.roomId, text)
+          .catch((error) => console.error("pairing reply failed", error));
+      const code = config.pairing?.code;
+      const allowed = pairingAttempts < PAIRING_MAX_ATTEMPTS;
+      pairingAttempts += 1;
+      if (!allowed || !code || !codesMatch(attempt, code)) {
+        await reply(PAIRING_FAILED);
+        return;
+      }
+      const roomId = controlRoomId ?? (await createControlRoom());
+      setControlRoom(roomId);
+      await matrix.invite(roomId, sender).catch((error) => console.error("control invite failed", error));
+      await matrix
+        .setPowerLevel(roomId, sender, CONTROL_POWER_LEVEL)
+        .catch((error) => console.error("control power level failed", error));
+      await reply(`${PAIRING_DONE_PREFIX}${roomId}`);
+    };
 
     const isNightNow = () => isNightAt(new Date(), config.nightStartHour, config.nightEndHour);
 
@@ -388,6 +442,12 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       const sender = event.getSender();
       if (!sender) return;
 
+      const text = content.msgtype === "m.text" ? String(content.body ?? "") : "";
+      if (text.startsWith(PAIRING_PREFIX)) {
+        await pair(room, sender, text.slice(PAIRING_PREFIX.length));
+        return;
+      }
+
       const recordUnread = (kind: "text" | "photo", body: string | null) => {
         pendingReads.set(room.roomId, event);
         setActivity(
@@ -497,7 +557,8 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
     matrix.on(RoomEvent.MyMembership, (room: Room, membership: string) => {
       if (stopped || membership !== "invite") return;
       const inviter = room.getMember(config.userId)?.events.member?.getSender();
-      if (config.contacts && (!inviter || !config.contacts.includes(inviter))) {
+      const pairingOpen = config.pairing !== null && controlRoomId === null;
+      if (!pairingOpen && config.contacts && (!inviter || !config.contacts.includes(inviter))) {
         console.warn(`invite ignored from ${inviter ?? "unknown"}: ${room.roomId}`);
         return;
       }
@@ -507,6 +568,8 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
           reportUnencrypted(joined);
           addPhotos(await loadRecentPhotos(matrix, joined));
           if (stopped) return;
+          const found = findControlRoom();
+          if (found) setControlRoom(found);
           reportContacts();
           if (mode === "idle") showIdle();
         })
@@ -532,6 +595,8 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       addPhotos(await loadRecentPhotos(matrix, room));
       if (stopped) return;
     }
+    controlRoomId = findControlRoom();
+    callbacks.reportPaired(controlRoomId !== null);
     reportContacts();
     showIdle();
 

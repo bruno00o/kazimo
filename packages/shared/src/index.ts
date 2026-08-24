@@ -1,4 +1,13 @@
 export { A2UI_ICONS, type A2uiIcon, type A2uiNode } from "./a2ui";
+export {
+  codesMatch,
+  formatPairingCode,
+  normalizePairingCode,
+  PAIRING_CODE_ALPHABET,
+  PAIRING_CODE_LENGTH,
+  PAIRING_QR_KIND,
+  pairingQrPayload,
+} from "./pairing";
 export { type Tokens, tokens } from "./tokens";
 
 import type { A2uiIcon, A2uiNode } from "./a2ui";
@@ -121,4 +130,5 @@ export interface KioskConfig {
   autoAnswerDelayMs: number;
   nightStartHour: number;
   nightEndHour: number;
+  pairing: { code: string } | null;
 }

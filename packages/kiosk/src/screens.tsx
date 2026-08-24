@@ -1,6 +1,7 @@
 import type { A2uiNode, ActivitySummary, KioskState, Person, PhotoRef, WeatherSummary } from "@kazimo/shared";
-import { tokens } from "@kazimo/shared";
+import { formatPairingCode, pairingQrPayload, tokens } from "@kazimo/shared";
 import { MessageSquare, Phone } from "lucide-react";
+import { toString as qrToString } from "qrcode";
 import { useEffect, useState } from "react";
 import { A2uiView, ICONS } from "./a2ui";
 import { type BadgeGroup, badgeFor } from "./activity";
@@ -220,6 +221,43 @@ export function DegradedScreen({
       <div className="degraded-title">{title}</div>
       <div className="degraded-subtitle">{subtitle}</div>
       <div className="hint">{reason}</div>
+    </div>
+  );
+}
+
+const QR_MARGIN_MODULES = 1;
+
+function usePairingQr(userId: string, code: string) {
+  const [source, setSource] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void qrToString(pairingQrPayload(userId, code), {
+      type: "svg",
+      margin: QR_MARGIN_MODULES,
+      errorCorrectionLevel: "M",
+      color: { dark: tokens.theme.light.ink, light: tokens.theme.light.ground },
+    })
+      .then((svg) => {
+        if (live) setSource(`data:image/svg+xml;utf8,${encodeURIComponent(svg)}`);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [userId, code]);
+  return source;
+}
+
+export function PairingScreen({ userId, code }: { userId: string; code: string }) {
+  const { lang } = useKioskState();
+  const strings = stringsFor(lang);
+  const source = usePairingQr(userId, code);
+  return (
+    <div className="screen theme-light">
+      <Aurora periodMs={tokens.breath.idleMs} />
+      {source && <img className="pairing-qr" src={source} alt="" />}
+      <div className="pairing-code">{formatPairingCode(code)}</div>
+      <div className="soft">{strings.pairingPrompt}</div>
     </div>
   );
 }

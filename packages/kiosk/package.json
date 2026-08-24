@@ -11,10 +11,12 @@
     "matrix-encrypt-attachment": "1.0.3",
     "matrix-js-sdk": "42.1.0",
     "matrix-widget-api": "1.18.0",
+    "qrcode": "1.5.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@types/qrcode": "1.5.5",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0"
   }

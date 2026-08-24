@@ -218,6 +218,24 @@
   z-index: 1;
 }
 
+.pairing-qr {
+  width: 44vh;
+  height: 44vh;
+  padding: 2vh;
+  border-radius: var(--kz-radius-card);
+  background: var(--ground);
+  box-shadow: var(--kz-color-shadow);
+  z-index: 1;
+}
+
+.pairing-code {
+  font-size: var(--kz-type-name);
+  font-weight: var(--kz-weight-bold);
+  letter-spacing: 0.06em;
+  line-height: 1;
+  z-index: 1;
+}
+
 .hint {
   position: fixed;
   bottom: 2vh;

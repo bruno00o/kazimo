@@ -17,6 +17,8 @@ const StateCtx = createContext<{
   night: boolean;
   weather: WeatherSummary | null;
   noisy: boolean;
+  config: KioskConfig | null;
+  paired: boolean | null;
 }>({
   state: { kind: "idle", photo: null },
   setState: () => {},
@@ -24,6 +26,8 @@ const StateCtx = createContext<{
   night: false,
   weather: null,
   noisy: false,
+  config: null,
+  paired: null,
 });
 
 export function KioskStateProvider({ children }: { children: ReactNode }) {
@@ -32,6 +36,8 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
   const [night, setNight] = useState(forcedNight);
   const [weather, setWeather] = useState<WeatherSummary | null>(null);
   const [noisy, setNoisy] = useState(false);
+  const [config, setConfig] = useState<KioskConfig | null>(null);
+  const [paired, setPaired] = useState<boolean | null>(null);
   const noisyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showNoisy = useCallback(() => {
@@ -41,13 +47,17 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    fetch("/api/config")
+      .then((r) => r.json() as Promise<KioskConfig>)
+      .then((c) => {
+        setConfig(c);
+        if (!forcedLang) setLang(c.lang);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
     if (forcedState) {
-      if (!forcedLang) {
-        fetch("/api/config")
-          .then((r) => r.json() as Promise<KioskConfig>)
-          .then((c) => setLang(c.lang))
-          .catch(() => {});
-      }
       const agent: AgentHandle = startAgent({
         onAssistant: (tree) => setState(tree ? { kind: "assistant", tree } : { kind: "idle", photo: null }),
         onWeather: setWeather,
@@ -72,6 +82,7 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
       setNight: forcedNight ? () => {} : setNight,
       reportActivity: (activity) => agent?.sendActivity(activity),
       reportContacts: (contacts) => agent?.sendContacts(contacts),
+      reportPaired: setPaired,
       announce: (announcement) => agent?.sendAnnounce(announcement),
     });
     agent = startAgent({
@@ -96,7 +107,9 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
   }, [showNoisy]);
 
   return (
-    <StateCtx.Provider value={{ state, setState, lang, night, weather, noisy }}>{children}</StateCtx.Provider>
+    <StateCtx.Provider value={{ state, setState, lang, night, weather, noisy, config, paired }}>
+      {children}
+    </StateCtx.Provider>
   );
 }
 
