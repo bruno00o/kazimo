@@ -61,11 +61,16 @@ const {
   generateScope,
   isExpiringSoon,
   normalizeHomeserver,
+  oidcSessionDataOf,
+  persistRotatedTokens,
   REDIRECT_URI,
   refreshSession,
   registerClient,
   scopesFor,
+  sequential,
+  sessionDelegateOf,
   sessionStoreOf,
+  singleFlight,
   TokenRefreshLogoutError,
   validateAuthMetadata,
   withTokens,
@@ -375,5 +380,153 @@ describe("refreshSession", () => {
       throw new Error("network request failed");
     };
     await expect(refreshSession(sessionOf())).rejects.toThrow("network request failed");
+  });
+
+  test("shares one token request between concurrent callers", async () => {
+    nativeStore.clear();
+    refreshResult = () => ({ accessToken: "mat_new", refreshToken: "mar_new", expiresIn: 300 });
+    const before = refreshCalls.length;
+    const [first, second] = await Promise.all([refreshSession(sessionOf()), refreshSession(sessionOf())]);
+    expect(refreshCalls.length).toBe(before + 1);
+    expect(first).toBe(second);
+  });
+});
+
+describe("singleFlight", () => {
+  const deferred = <T>(): { promise: Promise<T>; resolve: (value: T) => void } => {
+    let resolve: (value: T) => void = () => undefined;
+    const promise = new Promise<T>((settle) => {
+      resolve = settle;
+    });
+    return { promise, resolve };
+  };
+
+  test("joins callers onto the flight in progress", async () => {
+    const gate = deferred<number>();
+    let runs = 0;
+    const run = singleFlight(async () => {
+      runs += 1;
+      return gate.promise;
+    });
+    const first = run(undefined);
+    const second = run(undefined);
+    gate.resolve(7);
+    expect(await first).toBe(7);
+    expect(await second).toBe(7);
+    expect(runs).toBe(1);
+  });
+
+  test("starts a new flight once the previous one settled", async () => {
+    let runs = 0;
+    const run = singleFlight(async () => {
+      runs += 1;
+      return runs;
+    });
+    expect(await run(undefined)).toBe(1);
+    expect(await run(undefined)).toBe(2);
+  });
+
+  test("releases the slot when the flight fails", async () => {
+    let runs = 0;
+    const run = singleFlight(async () => {
+      runs += 1;
+      throw new Error(`attempt ${runs}`);
+    });
+    await expect(run(undefined)).rejects.toThrow("attempt 1");
+    await expect(run(undefined)).rejects.toThrow("attempt 2");
+  });
+});
+
+describe("sequential", () => {
+  test("runs tasks in order", async () => {
+    const order: number[] = [];
+    const queue = sequential();
+    const slow = queue(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      order.push(1);
+    });
+    const fast = queue(async () => {
+      order.push(2);
+    });
+    await Promise.all([slow, fast]);
+    expect(order).toEqual([1, 2]);
+  });
+
+  test("keeps running after a failed task", async () => {
+    const queue = sequential();
+    const failing = queue(async () => {
+      throw new Error("write failed");
+    });
+    let ran = false;
+    const next = queue(async () => {
+      ran = true;
+    });
+    await expect(failing).rejects.toThrow("write failed");
+    await next;
+    expect(ran).toBe(true);
+  });
+});
+
+describe("oidcSessionDataOf", () => {
+  test("carries the client id the rust sdk needs to refresh", () => {
+    expect(JSON.parse(oidcSessionDataOf("01CLIENT"))).toEqual({ client_id: "01CLIENT" });
+  });
+});
+
+describe("sessionDelegateOf", () => {
+  type SdkSession = Parameters<typeof sessionDelegateOf>[0];
+
+  const sdkSession = (accessToken: string, refreshToken?: string): SdkSession =>
+    ({
+      accessToken,
+      refreshToken,
+      userId: "@ana:matrix.kazimo.test",
+      deviceId: "ABCDEFGHIJ",
+      homeserverUrl: "https://matrix.kazimo.test",
+    }) as SdkSession;
+
+  test("reports rotated tokens and serves them back", () => {
+    const seen: { accessToken: string; refreshToken: string | null }[] = [];
+    const delegate = sessionDelegateOf(sdkSession("mat_old", "mar_old"), (tokens) => seen.push(tokens));
+    expect(delegate.retrieveSessionFromKeychain("@ana:matrix.kazimo.test").accessToken).toBe("mat_old");
+    delegate.saveSessionInKeychain(sdkSession("mat_new", "mar_new"));
+    expect(seen).toEqual([{ accessToken: "mat_new", refreshToken: "mar_new" }]);
+    expect(delegate.retrieveSessionFromKeychain("@ana:matrix.kazimo.test").accessToken).toBe("mat_new");
+  });
+
+  test("reports a missing refresh token as none", () => {
+    const seen: { accessToken: string; refreshToken: string | null }[] = [];
+    const delegate = sessionDelegateOf(sdkSession("mat_old", "mar_old"), (tokens) => seen.push(tokens));
+    delegate.saveSessionInKeychain(sdkSession("mat_new"));
+    expect(seen).toEqual([{ accessToken: "mat_new", refreshToken: null }]);
+  });
+});
+
+describe("persistRotatedTokens", () => {
+  const stored = (): StoredSession => JSON.parse(nativeStore.get("kazimo.session") ?? "{}") as StoredSession;
+
+  test("keeps the rest of the session and drops the unknown expiry", async () => {
+    nativeStore.clear();
+    nativeStore.set("kazimo.session", JSON.stringify(sessionOf()));
+    await persistRotatedTokens({ accessToken: "mat_new", refreshToken: "mar_new" });
+    expect(stored()).toEqual({
+      ...sessionOf(),
+      accessToken: "mat_new",
+      refreshToken: "mar_new",
+      expiresAt: null,
+    });
+  });
+
+  test("keeps the stored refresh token when the sdk reports none", async () => {
+    nativeStore.clear();
+    nativeStore.set("kazimo.session", JSON.stringify(sessionOf()));
+    await persistRotatedTokens({ accessToken: "mat_new", refreshToken: null });
+    expect(stored().refreshToken).toBe("mar_old");
+  });
+
+  test("writes nothing once the session is gone", async () => {
+    nativeStore.clear();
+    await persistRotatedTokens({ accessToken: "mat_new", refreshToken: "mar_new" });
+    expect(nativeStore.size).toBe(0);
   });
 });

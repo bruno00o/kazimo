@@ -8,6 +8,7 @@ import {
   clearSession,
   isExpiringSoon,
   loadSession,
+  persistRotatedTokens,
   refreshSession,
   signOut as revokeAndForget,
   type StoredSession,
@@ -24,6 +25,7 @@ import {
   type Security,
 } from "./e2ee";
 import { readEnv } from "./env";
+import { UnauthorizedError } from "./http";
 import { appStrings } from "./i18n";
 import { type MatrixHandle, startMatrix } from "./matrix";
 import { SecurityGate } from "./SecurityGate";
@@ -59,7 +61,6 @@ type Connected = {
   handle: MatrixHandle;
   homeserver: string;
   identity: Identity;
-  stored: StoredSession | null;
 };
 
 type Phase =
@@ -77,7 +78,12 @@ const credentialsOf = (stored: StoredSession | null): Credentials | null => {
   return env ? { kind: "env", homeserver: env.homeserver, token: env.token } : null;
 };
 
-const open = async (homeserver: string, token: string, stored: StoredSession | null): Promise<Connected> => {
+const open = async (
+  homeserver: string,
+  token: string,
+  stored: StoredSession | null,
+  onAuthError: () => void,
+): Promise<Connected> => {
   const identity = await whoami(homeserver, token);
   if (identity.deviceId)
     void setDeviceName(homeserver, token, identity.deviceId, DEVICE_DISPLAY_NAME).catch(() => undefined);
@@ -87,23 +93,32 @@ const open = async (homeserver: string, token: string, stored: StoredSession | n
       homeserver,
       accessToken: token,
       refreshToken: stored?.refreshToken ?? undefined,
+      oidcClientId: stored?.clientId,
       userId: identity.userId,
       deviceId: identity.deviceId || (stored?.deviceId ?? ""),
     },
-    { bootstrapIdentity: !backupOnServer },
+    {
+      bootstrapIdentity: !backupOnServer,
+      watchers: {
+        onRotation: (rotated) => {
+          void persistRotatedTokens(rotated).catch(() => undefined);
+        },
+        onAuthError,
+      },
+    },
   );
   await acceptInvites(handle.client).catch(() => undefined);
-  return { handle, homeserver, identity, stored };
+  return { handle, homeserver, identity };
 };
 
-const connect = async (credentials: Credentials): Promise<Connected> => {
-  if (credentials.kind === "env") return open(credentials.homeserver, credentials.token, null);
+const connect = async (credentials: Credentials, onAuthError: () => void): Promise<Connected> => {
+  if (credentials.kind === "env") return open(credentials.homeserver, credentials.token, null, onAuthError);
   const stored = credentials.session;
   const fresh = isExpiringSoon(stored, Date.now()) ? await refreshSession(stored) : stored;
-  return open(fresh.homeserver, fresh.accessToken, fresh).catch(async (error) => {
-    if (!fresh.refreshToken) throw error;
+  return open(fresh.homeserver, fresh.accessToken, fresh, onAuthError).catch(async (error) => {
+    if (!(error instanceof UnauthorizedError) || !fresh.refreshToken) throw error;
     const refreshed = await refreshSession(fresh);
-    return open(refreshed.homeserver, refreshed.accessToken, refreshed);
+    return open(refreshed.homeserver, refreshed.accessToken, refreshed, onAuthError);
   });
 };
 
@@ -113,13 +128,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [center, setCenter] = useState<CallCenter | null>(null);
   const [securityDismissed, setSecurityDismissed] = useState(false);
   const dismissers = useRef(new Map<string, () => void>());
-  const latestStored = useRef<StoredSession | null>(null);
+  const activeHandle = useRef<MatrixHandle | null>(null);
 
   const registerCallDismiss = useCallback((roomId: string, dismiss: () => void) => {
     dismissers.current.set(roomId, dismiss);
     return () => {
       if (dismissers.current.get(roomId) === dismiss) dismissers.current.delete(roomId);
     };
+  }, []);
+
+  const abandonSession = useCallback(() => {
+    const handle = activeHandle.current;
+    activeHandle.current = null;
+    if (handle) void endSession(handle).catch(() => undefined);
+    void clearSession().catch(() => undefined);
+    void clearSecurityDone().catch(() => undefined);
+    setSecurityDismissed(false);
+    setPhase({ kind: "signedOut" });
   }, []);
 
   const finishSecurity = useCallback((completed: boolean) => {
@@ -148,7 +173,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
-        const connected = await connect(credentials);
+        const connected = await connect(credentials, abandonSession);
         if (cancelled) {
           await endSession(connected.handle).catch(() => undefined);
           return;
@@ -164,7 +189,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           await endSession(connected.handle).catch(() => undefined);
           return;
         }
-        latestStored.current = connected.stored;
+        activeHandle.current = connected.handle;
         setPhase({ kind: "ready", connected, security });
       } catch (error) {
         if (cancelled) return;
@@ -179,15 +204,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [credentials]);
+  }, [credentials, abandonSession]);
 
   const handle = phase.kind === "ready" ? phase.connected.handle : null;
   const client = handle?.client ?? null;
 
   const signOut = useCallback(async () => {
     if (handle) await endSession(handle).catch(() => undefined);
-    const stored = latestStored.current;
-    latestStored.current = null;
+    activeHandle.current = null;
+    const stored = await loadSession().catch(() => null);
     if (stored) await revokeAndForget(stored).catch(() => undefined);
     await clearSecurityDone().catch(() => undefined);
     setSecurityDismissed(false);

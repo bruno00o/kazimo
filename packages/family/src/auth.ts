@@ -1,3 +1,4 @@
+import type { ClientSessionDelegate, Session as SdkSession } from "@unomed/react-native-matrix-sdk";
 import {
   AuthRequest,
   CodeChallengeMethod,
@@ -181,6 +182,48 @@ export const withTokens = (
 export const isExpiringSoon = (session: Pick<StoredSession, "expiresAt">, nowMs: number): boolean =>
   session.expiresAt !== null && session.expiresAt - nowMs < EXPIRY_MARGIN_MS;
 
+export const oidcSessionDataOf = (clientId: string): string => JSON.stringify({ client_id: clientId });
+
+export type RotatedTokens = { accessToken: string; refreshToken: string | null };
+
+export const sessionDelegateOf = (
+  initial: SdkSession,
+  onRotation: (tokens: RotatedTokens) => void,
+): ClientSessionDelegate => {
+  let current = initial;
+  return {
+    retrieveSessionFromKeychain: () => current,
+    saveSessionInKeychain: (session) => {
+      current = session;
+      onRotation({ accessToken: session.accessToken, refreshToken: session.refreshToken ?? null });
+    },
+  };
+};
+
+export const singleFlight = <A, T>(run: (argument: A) => Promise<T>): ((argument: A) => Promise<T>) => {
+  let pending: Promise<T> | null = null;
+  return (argument) => {
+    if (pending) return pending;
+    const started = run(argument).finally(() => {
+      if (pending === started) pending = null;
+    });
+    pending = started;
+    return started;
+  };
+};
+
+export const sequential = (): ((task: () => Promise<void>) => Promise<void>) => {
+  let tail: Promise<void> = Promise.resolve();
+  return (task) => {
+    const next = tail.then(task, task);
+    tail = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  };
+};
+
 const isStoredSession = (value: unknown): value is StoredSession => {
   if (!isRecord(value)) return false;
   const strings = [
@@ -223,10 +266,19 @@ const secureStore: SecretStore = {
 };
 
 const sessions = sessionStoreOf(secureStore);
+const writes = sequential();
 
 export const loadSession = (): Promise<StoredSession | null> => sessions.load();
-export const saveSession = (session: StoredSession): Promise<void> => sessions.save(session);
-export const clearSession = (): Promise<void> => sessions.clear();
+export const saveSession = (session: StoredSession): Promise<void> => writes(() => sessions.save(session));
+export const clearSession = (): Promise<void> => writes(() => sessions.clear());
+
+export const persistRotatedTokens = (tokens: RotatedTokens): Promise<void> =>
+  writes(async () => {
+    const stored = await sessions.load();
+    if (!stored) return;
+    const grant = { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken ?? undefined };
+    await sessions.save(withTokens(stored, grant, Date.now()));
+  });
 
 const fetchJson = async (url: string): Promise<unknown | null> => {
   const res = await fetch(url, { headers: { Accept: "application/json" } });
@@ -329,7 +381,7 @@ export const signIn = async (homeserverInput: string): Promise<StoredSession> =>
   return confirmed;
 };
 
-export const refreshSession = async (session: StoredSession): Promise<StoredSession> => {
+const rotateTokens = async (session: StoredSession): Promise<StoredSession> => {
   if (!session.refreshToken) throw new TokenRefreshLogoutError(new Error("no refresh token"));
   try {
     const tokens = await refreshAsync(
@@ -344,6 +396,8 @@ export const refreshSession = async (session: StoredSession): Promise<StoredSess
     throw error;
   }
 };
+
+export const refreshSession = singleFlight(rotateTokens);
 
 export const signOut = async (session: StoredSession): Promise<void> => {
   const token = session.refreshToken ?? session.accessToken;

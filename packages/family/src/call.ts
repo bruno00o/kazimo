@@ -1,5 +1,5 @@
 import type { ClientLike } from "@unomed/react-native-matrix-sdk";
-import { accessTokenOf } from "./matrix";
+import { authorizedFetch } from "./http";
 
 export type SfuToken = {
   url: string;
@@ -38,14 +38,12 @@ export const rtcFocusUrl = async (homeserver: string): Promise<string> => {
 const openIdToken = async (client: ClientLike): Promise<unknown> => {
   const userId = client.session().userId;
   const base = csApiBase(client);
-  const res = await fetch(
+  const res = await authorizedFetch(
+    client,
     `${base}/_matrix/client/v3/user/${encodeURIComponent(userId)}/openid/request_token`,
     {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessTokenOf(client)}`,
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     },
   );
@@ -78,14 +76,12 @@ const membershipStateKey = (userId: string, deviceId: string): string =>
 const putMembership = async (client: ClientLike, roomId: string, content: unknown): Promise<void> => {
   const { userId, deviceId } = client.session();
   const stateKey = membershipStateKey(userId, deviceId);
-  const res = await fetch(
+  const res = await authorizedFetch(
+    client,
     `${csApiBase(client)}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${RTC_MEMBER_EVENT_TYPE}/${encodeURIComponent(stateKey)}`,
     {
       method: "PUT",
-      headers: {
-        Authorization: `Bearer ${accessTokenOf(client)}`,
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(content),
     },
   );

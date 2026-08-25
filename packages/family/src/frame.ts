@@ -9,6 +9,7 @@ import {
   frameStatusOf,
 } from "@kazimo/shared";
 import type { ClientLike } from "@unomed/react-native-matrix-sdk";
+import { authorizedFetch } from "./http";
 
 type Sdk = typeof import("@unomed/react-native-matrix-sdk");
 
@@ -88,12 +89,10 @@ export const frameLinkFromState = (roomId: string, payload: unknown, me: string)
 
 const csApiBase = (client: ClientLike): string => client.session().homeserverUrl.replace(/\/+$/, "");
 
-const bearer = (client: ClientLike): string => `Bearer ${client.session().accessToken}`;
-
 const roomState = async (client: ClientLike, roomId: string): Promise<unknown> => {
-  const res = await fetch(
+  const res = await authorizedFetch(
+    client,
     `${csApiBase(client)}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state`,
-    { headers: { Authorization: bearer(client) } },
   );
   if (!res.ok) throw new Error(`room state ${res.status}`);
   return res.json();
@@ -106,11 +105,12 @@ const putRoomState = async (
   stateKey: string,
   content: unknown,
 ): Promise<void> => {
-  const res = await fetch(
+  const res = await authorizedFetch(
+    client,
     `${csApiBase(client)}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/${encodeURIComponent(stateKey)}`,
     {
       method: "PUT",
-      headers: { Authorization: bearer(client), "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(content),
     },
   );
@@ -174,11 +174,12 @@ export const withAdminPower = (content: unknown, userId: string): Record<string,
 };
 
 const inviteUser = async (client: ClientLike, roomId: string, userId: string): Promise<void> => {
-  const res = await fetch(
+  const res = await authorizedFetch(
+    client,
     `${csApiBase(client)}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`,
     {
       method: "POST",
-      headers: { Authorization: bearer(client), "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id: userId }),
     },
   );
@@ -191,9 +192,9 @@ const roomStateContent = async (
   eventType: string,
   stateKey: string,
 ): Promise<unknown> => {
-  const res = await fetch(
+  const res = await authorizedFetch(
+    client,
     `${csApiBase(client)}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/${encodeURIComponent(stateKey)}`,
-    { headers: { Authorization: bearer(client) } },
   );
   if (!res.ok) throw new Error(`room state read ${res.status}`);
   return res.json();

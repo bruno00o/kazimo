@@ -6,6 +6,7 @@ import type {
   SyncServiceLike,
   TaskHandleLike,
 } from "@unomed/react-native-matrix-sdk";
+import { UNAUTHORIZED, UnauthorizedError } from "./http";
 import type { MatrixHandle } from "./matrix";
 
 export type Identity = {
@@ -41,6 +42,7 @@ export const whoami = async (homeserver: string, token: string): Promise<Identit
   const res = await fetch(`${homeserver}/_matrix/client/v3/account/whoami`, {
     headers: { Authorization: `Bearer ${token}` },
   });
+  if (res.status === UNAUTHORIZED) throw new UnauthorizedError("whoami");
   if (!res.ok) throw new Error(`whoami ${res.status}`);
   const body = (await res.json()) as { user_id: string; device_id?: string };
   return { userId: body.user_id, deviceId: body.device_id ?? "" };
