@@ -17,6 +17,7 @@ export type FrameLink = { frameUserId: string; controlRoomId: string };
 export type StateEvent = { type: string; stateKey: string; sender: string; content: unknown };
 
 const CREATE_EVENT_TYPE = "m.room.create";
+const POWER_LEVELS_EVENT_TYPE = "m.room.power_levels";
 const CONTROL_MARKER_STATE_KEY = "";
 const REMOVED_CONTACT_CONTENT = {};
 
@@ -166,15 +167,48 @@ export const removeFrameContact = (
 ): Promise<void> =>
   putRoomState(client, controlRoomId, CONTACT_EVENT_TYPE, contactStateKeyOf(userId), REMOVED_CONTACT_CONTENT);
 
+export const withAdminPower = (content: unknown, userId: string): Record<string, unknown> => {
+  const current = asRecord(content) ?? {};
+  const users = asRecord(current.users) ?? {};
+  return { ...current, users: { ...users, [userId]: CONTROL_ADMIN_POWER_LEVEL } };
+};
+
+const inviteUser = async (client: ClientLike, roomId: string, userId: string): Promise<void> => {
+  const res = await fetch(
+    `${csApiBase(client)}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`,
+    {
+      method: "POST",
+      headers: { Authorization: bearer(client), "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId }),
+    },
+  );
+  if (!res.ok) throw new Error(`invite ${res.status}`);
+};
+
+const roomStateContent = async (
+  client: ClientLike,
+  roomId: string,
+  eventType: string,
+  stateKey: string,
+): Promise<unknown> => {
+  const res = await fetch(
+    `${csApiBase(client)}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/${encodeURIComponent(stateKey)}`,
+    { headers: { Authorization: bearer(client) } },
+  );
+  if (!res.ok) throw new Error(`room state read ${res.status}`);
+  return res.json();
+};
+
 export const promoteAdmin = async (
   client: ClientLike,
   controlRoomId: string,
   userId: string,
 ): Promise<void> => {
-  const room = client.getRoom(controlRoomId);
-  if (!room) throw new Error("control room unavailable");
-  await room.inviteUserById(userId).catch((error) => console.error("control invite failed", error));
-  await room.updatePowerLevelsForUsers([{ userId, powerLevel: BigInt(CONTROL_ADMIN_POWER_LEVEL) }]);
+  await inviteUser(client, controlRoomId, userId).catch((error) =>
+    console.error("control invite failed", error),
+  );
+  const levels = await roomStateContent(client, controlRoomId, POWER_LEVELS_EVENT_TYPE, "");
+  await putRoomState(client, controlRoomId, POWER_LEVELS_EVENT_TYPE, "", withAdminPower(levels, userId));
 };
 
 export const adminSignalOf = (payload: unknown): boolean =>

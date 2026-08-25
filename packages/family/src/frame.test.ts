@@ -5,6 +5,7 @@ import {
   frameLinkFromState,
   frameLinkOf,
   stateEventsOf,
+  withAdminPower,
 } from "./frame";
 
 const FRAME = "@frame:matrix.example.org";
@@ -153,5 +154,20 @@ describe("adminSignalOf", () => {
     expect(adminSignalOf([stateEvent("dev.kazimo.frame", "extra", { hasAdmin: true })])).toBe(false);
     expect(adminSignalOf([created(), marker()])).toBe(false);
     expect(adminSignalOf(undefined)).toBe(false);
+  });
+});
+
+describe("withAdminPower", () => {
+  test("grants the admin level and keeps the rest of the content", () => {
+    expect(withAdminPower({ users: { [FRAME]: 100 }, events: { "dev.kazimo.contact": 100 } }, ME)).toEqual({
+      users: { [FRAME]: 100, [ME]: 100 },
+      events: { "dev.kazimo.contact": 100 },
+    });
+  });
+
+  test("builds the users map when the content is empty or unreadable", () => {
+    expect(withAdminPower({}, ME)).toEqual({ users: { [ME]: 100 } });
+    expect(withAdminPower(undefined, ME)).toEqual({ users: { [ME]: 100 } });
+    expect(withAdminPower({ users: "broken" }, ME)).toEqual({ users: { [ME]: 100 } });
   });
 });
