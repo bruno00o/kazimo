@@ -4,6 +4,7 @@ import {
   contactOf,
   contactUserIdOf,
   type FrameContact,
+  frameStatusOf,
 } from "@kazimo/shared";
 
 export interface ContactStateEntry {
@@ -68,6 +69,12 @@ export const repairedPowerLevels = (content: unknown): PowerLevelsContent | null
   if (typeof events[CONTACT_EVENT_TYPE] === "number") return null;
   return { ...current, events: { ...events, [CONTACT_EVENT_TYPE]: CONTROL_ADMIN_POWER_LEVEL } };
 };
+
+export const adminPresent = (memberIds: readonly string[], selfId: string): boolean =>
+  memberIds.some((memberId) => memberId !== selfId);
+
+export const statusNeedsUpdate = (content: unknown, hasAdmin: boolean): boolean =>
+  frameStatusOf(content) !== hasAdmin;
 
 export const displayNameOf = (
   desired: ReadonlyMap<string, FrameContact>,

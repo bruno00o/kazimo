@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { contactsOf, frameLinkFromState, frameLinkOf, stateEventsOf } from "./frame";
+import {
+  adminSignalOf,
+  contactsOf,
+  frameLinkFromState,
+  frameLinkOf,
+  stateEventsOf,
+} from "./frame";
 
 const FRAME = "@frame:matrix.example.org";
 const ME = "@ana:matrix.example.org";
@@ -136,5 +142,16 @@ describe("frameLinkFromState", () => {
 
   test("ignores an identifier that is not a room", () => {
     expect(frameLinkFromState("control", [created(), marker()], ME)).toBeNull();
+  });
+});
+
+describe("adminSignalOf", () => {
+  test("true only for a root frame status event marking an admin", () => {
+    expect(adminSignalOf([stateEvent("dev.kazimo.frame", "", { hasAdmin: true })])).toBe(true);
+    expect(adminSignalOf([stateEvent("dev.kazimo.frame", "", { hasAdmin: false })])).toBe(false);
+    expect(adminSignalOf([stateEvent("dev.kazimo.frame", "", {})])).toBe(false);
+    expect(adminSignalOf([stateEvent("dev.kazimo.frame", "extra", { hasAdmin: true })])).toBe(false);
+    expect(adminSignalOf([created(), marker()])).toBe(false);
+    expect(adminSignalOf(undefined)).toBe(false);
   });
 });

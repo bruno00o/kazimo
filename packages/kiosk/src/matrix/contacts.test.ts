@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { CONTACT_EVENT_TYPE, CONTROL_ADMIN_POWER_LEVEL, contactStateKeyOf } from "@kazimo/shared";
 import {
+  adminPresent,
   contactsToProvision,
   desiredContacts,
   directRoomsByPeer,
   displayNameOf,
   removedContacts,
   repairedPowerLevels,
+  statusNeedsUpdate,
 } from "./contacts";
 
 const FRAME = "@kazimo:example.org";
@@ -137,5 +139,28 @@ describe("displayNameOf", () => {
     const desired = desiredContacts([{ stateKey: contactStateKeyOf(MARIA), content: { name: "Maria" } }]);
     expect(displayNameOf(desired, MARIA, "maria.silva")).toBe("Maria");
     expect(displayNameOf(desired, JOAO, "Joao Silva")).toBe("Joao Silva");
+  });
+});
+
+describe("adminPresent", () => {
+  test("true when someone besides the frame is in the control room", () => {
+    expect(adminPresent([FRAME, MARIA], FRAME)).toBe(true);
+    expect(adminPresent([FRAME], FRAME)).toBe(false);
+    expect(adminPresent([], FRAME)).toBe(false);
+  });
+});
+
+describe("statusNeedsUpdate", () => {
+  test("publishes when the signal differs from reality", () => {
+    expect(statusNeedsUpdate(undefined, true)).toBe(true);
+    expect(statusNeedsUpdate({ hasAdmin: false }, true)).toBe(true);
+    expect(statusNeedsUpdate({ hasAdmin: true }, false)).toBe(true);
+  });
+
+  test("stays silent when the signal already matches", () => {
+    expect(statusNeedsUpdate({ hasAdmin: true }, true)).toBe(false);
+    expect(statusNeedsUpdate(undefined, false)).toBe(false);
+    expect(statusNeedsUpdate({}, false)).toBe(false);
+    expect(statusNeedsUpdate("hasAdmin", false)).toBe(false);
   });
 });

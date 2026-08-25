@@ -1,6 +1,14 @@
 export const CONTROL_EVENT_TYPE = "dev.kazimo.control";
 export const CONTACT_EVENT_TYPE = "dev.kazimo.contact";
+export const FRAME_EVENT_TYPE = "dev.kazimo.frame";
 export const CONTROL_ADMIN_POWER_LEVEL = 100;
+
+export interface FrameStatusContent {
+  hasAdmin?: boolean;
+}
+
+export const frameStatusOf = (content: unknown): boolean =>
+  typeof content === "object" && content !== null && (content as FrameStatusContent).hasAdmin === true;
 
 export interface ContactContent {
   name?: string;

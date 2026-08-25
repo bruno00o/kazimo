@@ -7,6 +7,7 @@ import {
   CONTROL_EVENT_TYPE,
   type Contact,
   codesMatch,
+  FRAME_EVENT_TYPE,
   type FrameContact,
   type HistoryMessage,
   type KioskConfig,
@@ -42,6 +43,7 @@ import { isNightAt } from "../night";
 import { playConnected, playEnded, playMessage, startRinging, stopRinging } from "../sounds";
 import { CallHost, type CallIntent, RTC_MEMBER_TYPES } from "./call";
 import {
+  adminPresent,
   type ContactStateEntry,
   contactsToProvision,
   desiredContacts,
@@ -50,6 +52,7 @@ import {
   type RoomView,
   removedContacts,
   repairedPowerLevels,
+  statusNeedsUpdate,
 } from "./contacts";
 import { ensureCryptoIdentity, secretStorageCallbacks } from "./crypto";
 import { plainMediaUrl } from "./media";
@@ -592,6 +595,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
         invite: [contact.userId],
         initial_state: [
           { type: EventType.RoomEncryption, state_key: "", content: { algorithm: ENCRYPTION_ALGORITHM } },
+          { type: FRAME_EVENT_TYPE, state_key: "", content: { hasAdmin: true } },
         ],
         power_level_content_override: {
           users: {
@@ -601,6 +605,32 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
           events: Object.fromEntries([...RTC_MEMBER_TYPES].map((type) => [type, RTC_MEMBER_POWER_LEVEL])),
         },
       });
+
+    const controlMemberIds = (): string[] => {
+      const room = controlRoomId ? matrix.getRoom(controlRoomId) : null;
+      if (!room) return [];
+      return room
+        .getMembers()
+        .filter((member) => member.membership === "join" || member.membership === "invite")
+        .map((member) => member.userId);
+    };
+
+    const publishFrameStatus = async () => {
+      const hasAdmin = adminPresent(controlMemberIds(), config.userId);
+      for (const roomId of directRoomsByPeer(roomViews(), config.userId).values()) {
+        const room = matrix.getRoom(roomId);
+        if (!room) continue;
+        const current = room.currentState.getStateEvents(FRAME_EVENT_TYPE, "")?.getContent();
+        if (!statusNeedsUpdate(current, hasAdmin)) continue;
+        await matrix
+          .sendStateEvent(
+            roomId,
+            FRAME_EVENT_TYPE as keyof StateEvents,
+            { hasAdmin } as unknown as StateEvents[keyof StateEvents],
+          )
+          .catch((error) => console.error(`frame status publish failed for ${roomId}`, error));
+      }
+    };
 
     const provisionedRooms = new Map<string, string>();
     let reconciling = false;
@@ -635,6 +665,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
             if (stopped) return;
             await provision(contact);
           }
+          await publishFrameStatus();
           reportContacts();
         } while (reconcileRequested && !stopped);
       } finally {
@@ -652,8 +683,10 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       }, RECONCILE_DEBOUNCE_MS);
     };
 
-    matrix.on(RoomStateEvent.Members, () => {
-      if (!stopped) reportContacts();
+    matrix.on(RoomStateEvent.Members, (event: MatrixEvent) => {
+      if (stopped) return;
+      if (event.getRoomId() === controlRoomId) scheduleReconcile();
+      reportContacts();
     });
 
     matrix.on(ClientEvent.Sync, (syncState) => {

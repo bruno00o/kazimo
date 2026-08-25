@@ -7,7 +7,10 @@ export {
   contactOf,
   contactStateKeyOf,
   contactUserIdOf,
+  FRAME_EVENT_TYPE,
   type FrameContact,
+  type FrameStatusContent,
+  frameStatusOf,
 } from "./control";
 export {
   codesMatch,

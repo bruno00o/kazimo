@@ -4,13 +4,13 @@ import {
   CONTROL_EVENT_TYPE,
   contactOf,
   contactStateKeyOf,
+  FRAME_EVENT_TYPE,
   type FrameContact,
+  frameStatusOf,
 } from "@kazimo/shared";
 import type { ClientLike } from "@unomed/react-native-matrix-sdk";
 
 type Sdk = typeof import("@unomed/react-native-matrix-sdk");
-
-export const FRAME_EVENT_TYPE = "dev.kazimo.frame";
 
 export type FrameLink = { frameUserId: string; controlRoomId: string };
 
@@ -175,6 +175,31 @@ export const promoteAdmin = async (
   if (!room) throw new Error("control room unavailable");
   await room.inviteUserById(userId).catch((error) => console.error("control invite failed", error));
   await room.updatePowerLevelsForUsers([{ userId, powerLevel: BigInt(CONTROL_ADMIN_POWER_LEVEL) }]);
+};
+
+export const adminSignalOf = (payload: unknown): boolean =>
+  stateEventsOf(payload).some(
+    (event) => event.type === FRAME_EVENT_TYPE && event.stateKey === "" && frameStatusOf(event.content),
+  );
+
+const managedElsewhere = async (client: ClientLike): Promise<boolean> => {
+  const { Membership } = await sdk();
+  for (const room of client.rooms()) {
+    if (room.membership() !== Membership.Joined) continue;
+    const info = await room.roomInfo().catch(() => null);
+    if (!info?.isDirect) continue;
+    const state = await roomState(client, room.id()).catch(() => null);
+    if (state !== null && adminSignalOf(state)) return true;
+  }
+  return false;
+};
+
+export type FrameAccess = { link: FrameLink | null; adminElsewhere: boolean };
+
+export const frameAccess = async (client: ClientLike): Promise<FrameAccess> => {
+  const link = await frameLink(client);
+  if (link) return { link, adminElsewhere: false };
+  return { link: null, adminElsewhere: await managedElsewhere(client) };
 };
 
 export const profileName = async (client: ClientLike, userId: string): Promise<string> => {
