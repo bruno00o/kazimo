@@ -1,26 +1,20 @@
 import { tokens } from "@kazimo/shared";
 import * as WebBrowser from "expo-web-browser";
 import { useCallback, useState } from "react";
-import {
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { KeyboardAvoidingView, Platform, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SignInCancelledError, type StoredSession, signIn } from "../src/auth";
 import { readHomeserver } from "../src/env";
+import { Icon } from "../src/Icon";
 import { appStrings } from "../src/i18n";
+import { Failure, Field, PrimaryButton } from "../src/ui";
 
 WebBrowser.maybeCompleteAuthSession();
 
 const t = appStrings();
 
-const WHITE = "#ffffff";
+const BADGE_SIZE = 112;
+const BADGE_ICON_SIZE = 56;
 
 type LoginProps = {
   onSignedIn?: (session: StoredSession) => void;
@@ -48,25 +42,24 @@ export default function Login({ onSignedIn }: LoginProps) {
     }
   }, [homeserver, onSignedIn, pending]);
 
-  const disabled = pending || homeserver.trim().length === 0;
-
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       style={[styles.screen, { paddingTop: insets.top + 48, paddingBottom: insets.bottom + 24 }]}
     >
       <View style={styles.hero}>
+        <View style={styles.badge}>
+          <Icon name="frame" color={tokens.color.blueDeep} size={BADGE_ICON_SIZE} />
+        </View>
         <Text style={styles.title}>{t.welcome}</Text>
         <Text style={styles.body}>{t.welcomeBody}</Text>
       </View>
       <View style={styles.form}>
-        <Text style={styles.label}>{t.homeserver}</Text>
-        <TextInput
-          style={styles.input}
+        <Field
+          label={t.homeserver}
           value={homeserver}
           onChangeText={setHomeserver}
           placeholder={t.homeserverPlaceholder}
-          placeholderTextColor={tokens.theme.light.inkFaint}
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="url"
@@ -75,16 +68,13 @@ export default function Login({ onSignedIn }: LoginProps) {
           editable={!pending}
           onSubmitEditing={() => void submit()}
         />
-        <Pressable
-          style={[styles.button, disabled && styles.buttonDisabled]}
-          disabled={disabled}
+        <PrimaryButton
+          label={pending ? t.signingIn : t.signIn}
+          pending={pending}
+          disabled={homeserver.trim().length === 0}
           onPress={() => void submit()}
-          accessibilityRole="button"
-        >
-          {pending && <ActivityIndicator color={WHITE} />}
-          <Text style={styles.buttonText}>{pending ? t.signingIn : t.signIn}</Text>
-        </Pressable>
-        {failure && <Text style={styles.failure}>{failure}</Text>}
+        />
+        <Failure text={failure} />
       </View>
     </KeyboardAvoidingView>
   );
@@ -98,55 +88,34 @@ const styles = StyleSheet.create({
     backgroundColor: tokens.theme.light.ground,
   },
   hero: {
-    gap: 12,
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 14,
+    paddingHorizontal: 16,
+  },
+  badge: {
+    width: BADGE_SIZE,
+    height: BADGE_SIZE,
+    borderRadius: BADGE_SIZE / 2,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 10,
+    backgroundColor: tokens.color.blueSoft,
   },
   title: {
-    fontSize: 34,
+    fontSize: 30,
     fontWeight: "700",
+    textAlign: "center",
     color: tokens.color.blueDeep,
   },
   body: {
-    fontSize: 18,
-    lineHeight: 26,
+    fontSize: 17,
+    lineHeight: 24,
+    textAlign: "center",
     color: tokens.theme.light.inkSoft,
   },
   form: {
     gap: 10,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: tokens.theme.light.inkSoft,
-  },
-  input: {
-    height: 52,
-    paddingHorizontal: 16,
-    borderRadius: 14,
-    fontSize: 18,
-    color: tokens.theme.light.ink,
-    backgroundColor: tokens.color.blueSoft,
-  },
-  button: {
-    marginTop: 8,
-    height: 56,
-    borderRadius: 999,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    backgroundColor: tokens.color.blue,
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: WHITE,
-  },
-  failure: {
-    fontSize: 14,
-    textAlign: "center",
-    color: tokens.color.danger,
   },
 });

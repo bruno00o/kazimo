@@ -1,5 +1,6 @@
 import { tokens } from "@kazimo/shared";
 import { FlashList } from "@shopify/flash-list";
+import type { ClientLike } from "@unomed/react-native-matrix-sdk";
 import * as Haptics from "expo-haptics";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -8,7 +9,7 @@ import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSw
 import ReanimatedSwipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ContextMenu, hasNativeContextMenu, type MenuAction, openActionsAlert } from "../src/ContextMenu";
-import { frameLink } from "../src/frame";
+import { type FrameAccess, frameAccess } from "../src/frame";
 import { Icon } from "../src/Icon";
 import { appStrings } from "../src/i18n";
 import {
@@ -21,6 +22,7 @@ import {
   subscribeConversations,
 } from "../src/session";
 import { useSession } from "../src/session-context";
+import { Avatar, EmptyState, initialOf } from "../src/ui";
 
 const t = appStrings();
 
@@ -37,9 +39,11 @@ const UNMUTE_SYMBOL = "bell";
 const LEAVE_SYMBOL = "rectangle.portrait.and.arrow.right";
 const ACTION_INK = "#ffffff";
 
+const AVATAR_SIZE = 56;
+
 const swallowLongPress = () => {};
 
-const initial = (name: string) => (name.trim()[0] ?? "?").toUpperCase();
+const localpartOf = (userId: string) => userId.replace(/^@/, "").split(":")[0] ?? userId;
 
 const timeLabel = (timestamp: number, locale: string): string => {
   if (timestamp <= 0) return "";
@@ -57,12 +61,14 @@ const previewLabel = (conversation: Conversation): string => {
 };
 
 function ConversationRow({
+  client,
   conversation,
   actions,
   onAction,
   onOpen,
   onFallbackActions,
 }: {
+  client: ClientLike;
   conversation: Conversation;
   actions: MenuAction[];
   onAction: (actionKey: string, conversation: Conversation) => void;
@@ -117,9 +123,13 @@ function ConversationRow({
           onPress={() => onOpen(conversation)}
           onLongPress={hasNativeContextMenu ? swallowLongPress : () => onFallbackActions(conversation)}
         >
-          <View style={[styles.avatar, conversation.kind === "group" && styles.avatarGroup]}>
-            <Text style={styles.avatarText}>{initial(conversation.name)}</Text>
-          </View>
+          <Avatar
+            client={client}
+            mxc={conversation.avatarUrl}
+            name={conversation.name}
+            size={AVATAR_SIZE}
+            shape={conversation.kind === "group" ? "rounded" : "circle"}
+          />
           <View style={styles.body}>
             <View style={styles.headline}>
               <Text style={[styles.name, conversation.unread > 0 && styles.nameUnread]} numberOfLines={1}>
@@ -151,11 +161,11 @@ function ConversationRow({
 }
 
 export default function Home() {
-  const { client, sync, signOut } = useSession();
+  const { client, sync, signOut, identity } = useSession();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [list, setList] = useState<Conversation[]>([]);
-  const [controlRoomId, setControlRoomId] = useState<string | null>(null);
+  const [access, setAccess] = useState<FrameAccess | null>(null);
 
   const refreshList = useCallback(() => {
     void conversations(client)
@@ -246,9 +256,9 @@ export default function Home() {
 
   useEffect(() => {
     let cancelled = false;
-    void frameLink(client)
-      .then((link) => {
-        if (!cancelled) setControlRoomId(link?.controlRoomId ?? null);
+    void frameAccess(client)
+      .then((found) => {
+        if (!cancelled) setAccess(found);
       })
       .catch(() => {});
     return () => {
@@ -258,12 +268,16 @@ export default function Home() {
 
   useFocusEffect(refreshList);
 
+  const controlRoomId = access?.link?.controlRoomId ?? null;
+  const showFrame = access !== null && (access.link !== null || !access.adminElsewhere);
   const visible = controlRoomId ? list.filter((conversation) => conversation.id !== controlRoomId) : list;
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
       <View style={styles.header}>
-        <Text style={styles.title}>{t.conversations}</Text>
+        <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit>
+          {t.conversations}
+        </Text>
         <Pressable
           style={styles.headerButton}
           accessibilityRole="button"
@@ -272,30 +286,35 @@ export default function Home() {
         >
           <Icon name="add" color={tokens.color.blue} />
         </Pressable>
+        {showFrame && (
+          <Pressable
+            style={styles.headerButton}
+            accessibilityRole="button"
+            accessibilityLabel={t.frameTitle}
+            onPress={() => router.push("/frame")}
+          >
+            <Icon name="frame" color={tokens.color.blue} />
+          </Pressable>
+        )}
         <Pressable
-          style={styles.headerButton}
-          accessibilityRole="button"
-          accessibilityLabel={t.frameTitle}
-          onPress={() => router.push("/frame")}
-        >
-          <Icon name="frame" color={tokens.color.blue} />
-        </Pressable>
-        <Pressable
-          style={styles.headerButton}
+          style={styles.accountChip}
           accessibilityRole="button"
           accessibilityLabel={t.signOut}
           onPress={confirmSignOut}
         >
-          <Icon name="signOut" color={tokens.theme.light.inkSoft} />
+          <Text style={styles.accountInitial}>{initialOf(localpartOf(identity.userId))}</Text>
         </Pressable>
       </View>
       <FlashList
         data={visible}
         keyExtractor={(conversation) => conversation.id}
         contentContainerStyle={styles.list}
-        ListEmptyComponent={<Text style={styles.empty}>{t.noConversations}</Text>}
+        ListEmptyComponent={
+          <EmptyState icon="group" title={t.noConversations} body={t.noConversationsHint} />
+        }
         renderItem={({ item }) => (
           <ConversationRow
+            client={client}
             conversation={item}
             actions={actionsFor(item)}
             onAction={runAction}
@@ -336,10 +355,17 @@ const styles = StyleSheet.create({
   list: {
     paddingBottom: 32,
   },
-  empty: {
-    marginTop: 48,
-    textAlign: "center",
+  accountChip: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: tokens.theme.light.surface,
+  },
+  accountInitial: {
     fontSize: 16,
+    fontWeight: "600",
     color: tokens.theme.light.inkSoft,
   },
   row: {
@@ -360,22 +386,6 @@ const styles = StyleSheet.create({
   },
   actionLeave: {
     backgroundColor: tokens.color.danger,
-  },
-  avatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: tokens.color.blueSoft,
-  },
-  avatarGroup: {
-    borderRadius: 18,
-  },
-  avatarText: {
-    fontSize: 24,
-    fontWeight: "600",
-    color: tokens.color.blueDeep,
   },
   body: {
     flex: 1,

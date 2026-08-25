@@ -2,6 +2,7 @@ export const tokens = {
   theme: {
     dark: {
       ground: "#131314",
+      surface: "#1e1f24",
       ink: "#e8eaed",
       inkSoft: "rgba(232, 234, 237, 0.75)",
       inkFaint: "rgba(232, 234, 237, 0.4)",
@@ -9,6 +10,7 @@ export const tokens = {
     },
     light: {
       ground: "#ffffff",
+      surface: "#f0f2f7",
       ink: "#1f1f1f",
       inkSoft: "#5f6368",
       inkFaint: "#9aa0a6",
@@ -21,6 +23,7 @@ export const tokens = {
     blueSoft: "#d3e3fd",
     danger: "#d93025",
     dangerSoft: "#f28b82",
+    onAccent: "#ffffff",
     shadow: "0 4px 30px rgba(0, 0, 0, 0.18)",
   },
   font: {

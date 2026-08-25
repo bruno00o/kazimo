@@ -54,6 +54,14 @@ const timeOf = (timestamp: number) =>
 const dayOf = (timestamp: number) =>
   new Date(timestamp).toLocaleDateString(t.locale, { weekday: "long", day: "numeric", month: "long" });
 
+const isGrouped = (list: readonly ChatItem[], index: number): boolean => {
+  const current = list[index];
+  const previous = index > 0 ? list[index - 1] : undefined;
+  if (!current || !previous) return false;
+  if (current.kind === "dayMarker" || previous.kind === "dayMarker") return false;
+  return previous.mine === current.mine && previous.senderName === current.senderName;
+};
+
 const typingLabelOf = (names: readonly string[]): string | null => {
   if (names.length === 0) return null;
   return names.length === 1 ? `${names[0]} ${t.typingOne}` : `${names.length} ${t.typingMany}`;
@@ -265,9 +273,10 @@ export default function ChatScreen() {
           onStartReachedThreshold={0.4}
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
-          renderItem={({ item }) => (
+          renderItem={({ item, index }) => (
             <Row
               item={item}
+              grouped={isGrouped(items, index)}
               showSender={conversation.kind === "group"}
               client={client}
               resolveSource={resolveSource}
@@ -387,12 +396,14 @@ function PhotoBubble({
 
 function Row({
   item,
+  grouped,
   showSender,
   client,
   resolveSource,
   onOpenPhoto,
 }: {
   item: ChatItem;
+  grouped: boolean;
   showSender: boolean;
   client: ClientLike;
   resolveSource: (mxc: string) => string | null;
@@ -404,7 +415,7 @@ function Row({
   const mine = item.mine;
   const isPhoto = item.kind === "image";
   return (
-    <View style={[styles.bubbleRow, mine && styles.bubbleRowMine]}>
+    <View style={[styles.bubbleRow, mine && styles.bubbleRowMine, grouped && styles.bubbleRowGrouped]}>
       <View
         style={[
           styles.bubble,
@@ -414,7 +425,7 @@ function Row({
           item.failed && styles.bubbleFailed,
         ]}
       >
-        {showSender && !mine && (
+        {showSender && !mine && !grouped && (
           <Text style={[styles.sender, isPhoto && styles.photoInsetTop]}>{item.senderName}</Text>
         )}
         {item.kind === "text" ? (
@@ -512,6 +523,9 @@ const styles = StyleSheet.create({
   bubbleRowMine: {
     justifyContent: "flex-end",
   },
+  bubbleRowGrouped: {
+    marginTop: 0,
+  },
   bubble: {
     maxWidth: "78%",
     paddingHorizontal: 14,
@@ -520,7 +534,7 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   bubbleTheirs: {
-    backgroundColor: tokens.color.blueSoft,
+    backgroundColor: tokens.theme.light.surface,
     borderBottomLeftRadius: 6,
   },
   bubbleMine: {
@@ -601,7 +615,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     fontSize: 17,
     color: tokens.theme.light.ink,
-    backgroundColor: tokens.color.blueSoft,
+    backgroundColor: tokens.theme.light.surface,
   },
   send: {
     width: 42,
@@ -620,7 +634,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: tokens.color.blueSoft,
+    backgroundColor: tokens.theme.light.surface,
   },
   viewer: {
     flex: 1,

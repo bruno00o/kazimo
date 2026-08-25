@@ -49,6 +49,7 @@ export interface Strings {
   tokenMissing: string;
   conversations: string;
   noConversations: string;
+  noConversationsHint: string;
   photo: string;
   you: string;
   messagePlaceholder: string;
@@ -159,6 +160,7 @@ const en: Strings = {
   tokenMissing: "Token missing.",
   conversations: "Conversations",
   noConversations: "No conversations yet",
+  noConversationsHint: "Start a conversation with your family.",
   photo: "Photo",
   you: "You",
   messagePlaceholder: "Message",
@@ -269,6 +271,7 @@ const fr: Strings = {
   tokenMissing: "Jeton manquant.",
   conversations: "Conversations",
   noConversations: "Pas encore de conversation",
+  noConversationsHint: "Commencez une conversation avec votre famille.",
   photo: "Photo",
   you: "Vous",
   messagePlaceholder: "Message",
@@ -381,6 +384,7 @@ const ptPT: Strings = {
   tokenMissing: "Falta o token.",
   conversations: "Conversas",
   noConversations: "Ainda sem conversas",
+  noConversationsHint: "Começa uma conversa com a tua família.",
   photo: "Foto",
   you: "Tu",
   messagePlaceholder: "Mensagem",
@@ -492,6 +496,7 @@ const es: Strings = {
   tokenMissing: "Falta el token.",
   conversations: "Conversaciones",
   noConversations: "Aún no hay conversaciones",
+  noConversationsHint: "Empieza una conversación con tu familia.",
   photo: "Foto",
   you: "Tú",
   messagePlaceholder: "Mensaje",

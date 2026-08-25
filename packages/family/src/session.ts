@@ -18,6 +18,7 @@ export type Conversation = {
   name: string;
   kind: "person" | "group";
   otherUserId: string | null;
+  avatarUrl: string | null;
   preview: { kind: "text"; body: string } | { kind: "photo" } | null;
   lastActive: number;
   unread: number;
@@ -91,6 +92,7 @@ const conversationOf = (
     name: other?.displayName ?? info.displayName ?? info.id,
     kind: isPerson ? "person" : "group",
     otherUserId: other?.userId ?? null,
+    avatarUrl: other?.avatarUrl ?? info.avatarUrl ?? null,
     preview: previewOf(module, latest),
     lastActive: latest ? Number(latest.timestamp) : 0,
     unread: Number(info.numUnreadNotifications),

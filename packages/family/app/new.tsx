@@ -2,7 +2,6 @@ import { tokens } from "@kazimo/shared";
 import { useRouter } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -17,11 +16,10 @@ import { Icon } from "../src/Icon";
 import { appStrings } from "../src/i18n";
 import { createDirect, createGroup, defaultServerFrom, normalizeMatrixId } from "../src/rooms";
 import { useSession } from "../src/session-context";
+import { Failure, Field, PrimaryButton, ScreenHeader, Segmented } from "../src/ui";
 
 const t = appStrings();
 
-const WHITE = "#ffffff";
-const BACK_ICON_SIZE = 26;
 const ADD_ICON_SIZE = 20;
 
 type Kind = "direct" | "group";
@@ -31,6 +29,11 @@ type Member = { key: string; value: string };
 type Plan =
   | { kind: "direct"; userId: string }
   | { kind: "group"; name: string; memberIds: readonly string[] };
+
+const KIND_OPTIONS = [
+  { key: "direct", label: t.newDirect },
+  { key: "group", label: t.newGroup },
+] as const;
 
 const firstMember = (): Member[] => [{ key: "1", value: "" }];
 
@@ -96,69 +99,43 @@ export default function NewConversation() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       style={[styles.screen, { paddingBottom: insets.bottom + 16 }]}
     >
-      <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
-        <Pressable accessibilityRole="button" style={styles.back} onPress={() => router.back()}>
-          <Icon name="back" color={tokens.color.blue} size={BACK_ICON_SIZE} />
-        </Pressable>
-        <Text style={styles.title} numberOfLines={1}>
-          {t.newConversation}
-        </Text>
+      <View style={{ paddingTop: insets.top + 14 }}>
+        <ScreenHeader title={t.newConversation} backLabel={t.cancel} onBack={() => router.back()} />
       </View>
 
       <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
-        <View style={styles.segmented}>
-          <Pressable
-            accessibilityRole="button"
-            style={[styles.pill, kind === "direct" && styles.pillActive]}
-            onPress={() => setKind("direct")}
-          >
-            <Text style={[styles.pillText, kind === "direct" && styles.pillTextActive]}>{t.newDirect}</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            style={[styles.pill, kind === "group" && styles.pillActive]}
-            onPress={() => setKind("group")}
-          >
-            <Text style={[styles.pillText, kind === "group" && styles.pillTextActive]}>{t.newGroup}</Text>
-          </Pressable>
-        </View>
+        <Segmented value={kind} options={KIND_OPTIONS} onChange={setKind} />
 
         {kind === "direct" ? (
-          <View style={styles.field}>
-            <Text style={styles.label}>{t.matrixId}</Text>
-            <TextInput
-              style={styles.input}
-              value={directId}
-              onChangeText={setDirectId}
-              placeholder={t.matrixIdPlaceholder}
-              placeholderTextColor={tokens.theme.light.inkFaint}
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoFocus
-              returnKeyType="done"
-              editable={!pending}
-              onSubmitEditing={() => void submit()}
-            />
-          </View>
+          <Field
+            label={t.matrixId}
+            value={directId}
+            onChangeText={setDirectId}
+            placeholder={t.matrixIdPlaceholder}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoFocus
+            returnKeyType="done"
+            editable={!pending}
+            onSubmitEditing={() => void submit()}
+          />
         ) : (
-          <View style={styles.field}>
-            <Text style={styles.label}>{t.groupName}</Text>
-            <TextInput
-              style={styles.input}
+          <View style={styles.fields}>
+            <Field
+              label={t.groupName}
               value={groupName}
               onChangeText={setGroupName}
               placeholder={t.groupNamePlaceholder}
-              placeholderTextColor={tokens.theme.light.inkFaint}
               autoCorrect={false}
               autoFocus
               returnKeyType="next"
               editable={!pending}
             />
-            <Text style={styles.label}>{t.matrixId}</Text>
+            <Text style={styles.membersLabel}>{t.matrixId}</Text>
             {members.map((member) => (
               <TextInput
                 key={member.key}
-                style={styles.input}
+                style={styles.memberInput}
                 value={member.value}
                 onChangeText={(value) => updateMember(member.key, value)}
                 placeholder={t.matrixIdPlaceholder}
@@ -181,16 +158,8 @@ export default function NewConversation() {
           </View>
         )}
 
-        <Pressable
-          style={[styles.button, pending && styles.buttonDisabled]}
-          disabled={pending}
-          accessibilityRole="button"
-          onPress={() => void submit()}
-        >
-          {pending && <ActivityIndicator color={WHITE} />}
-          <Text style={styles.buttonText}>{t.create}</Text>
-        </Pressable>
-        {failed && <Text style={styles.failure}>{t.createFailed}</Text>}
+        <PrimaryButton label={t.create} pending={pending} onPress={() => void submit()} />
+        <Failure text={failed ? t.createFailed : null} />
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -201,69 +170,25 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: tokens.theme.light.ground,
   },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 8,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: tokens.theme.light.inkFaint,
-  },
-  back: {
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  title: {
-    flex: 1,
-    fontSize: 20,
-    fontWeight: "600",
-    color: tokens.theme.light.ink,
-  },
   form: {
     gap: 16,
     padding: 20,
   },
-  segmented: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  pill: {
-    flex: 1,
-    height: 44,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: tokens.color.blueSoft,
-  },
-  pillActive: {
-    backgroundColor: tokens.color.blue,
-  },
-  pillText: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: tokens.color.blueDeep,
-  },
-  pillTextActive: {
-    color: WHITE,
-  },
-  field: {
+  fields: {
     gap: 10,
   },
-  label: {
+  membersLabel: {
     fontSize: 14,
     fontWeight: "600",
     color: tokens.theme.light.inkSoft,
   },
-  input: {
+  memberInput: {
     height: 52,
     paddingHorizontal: 16,
     borderRadius: 14,
     fontSize: 18,
     color: tokens.theme.light.ink,
-    backgroundColor: tokens.color.blueSoft,
+    backgroundColor: tokens.theme.light.surface,
   },
   addMember: {
     flexDirection: "row",
@@ -275,28 +200,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     color: tokens.color.blue,
-  },
-  button: {
-    marginTop: 8,
-    height: 56,
-    borderRadius: 999,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    backgroundColor: tokens.color.blue,
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: WHITE,
-  },
-  failure: {
-    fontSize: 14,
-    textAlign: "center",
-    color: tokens.color.danger,
   },
 });
