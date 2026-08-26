@@ -109,6 +109,7 @@ function start(
     ai: _ai,
     agent: _agent,
     wake: _wake,
+    ring: _ring,
     chatTtlMs: _chatTtl,
     followupWindowMs: _followup,
     ...kioskConfig
@@ -417,6 +418,11 @@ export class KioskServer extends Context.Service<
       );
 
       yield* Effect.log(`serving kiosk on http://localhost:${server.port}`);
+      yield* Effect.log(
+        config.ring
+          ? `ring gateway on for ${Object.keys(config.ring.deviceTokens).length} contacts`
+          : "ring gateway off",
+      );
 
       return KioskServer.of({ server });
     }),

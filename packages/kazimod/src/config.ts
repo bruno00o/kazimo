@@ -1,4 +1,4 @@
-import type { KioskConfig } from "@kazimo/shared";
+import { isRingDeviceToken, type KioskConfig, RING_MAX_DEVICE_TOKENS } from "@kazimo/shared";
 import { Config, Option } from "effect";
 import { generatePairingCode } from "./pairing";
 
@@ -21,6 +21,13 @@ export interface AgentConfig {
   searchKey: string | null;
 }
 
+export interface RingConfig {
+  url: string;
+  token: string;
+  callerName: string;
+  deviceTokens: Record<string, string[]>;
+}
+
 export interface WakeConfig {
   modelPath: string | null;
   threshold: number;
@@ -33,6 +40,7 @@ export interface DaemonConfig extends KioskConfig {
   ai: AiConfig;
   agent: AgentConfig;
   wake: WakeConfig;
+  ring: RingConfig | null;
   chatTtlMs: number;
   followupWindowMs: number;
   port: number;
@@ -61,6 +69,30 @@ const pairing: Config.Config<{ code: string } | null> = Config.string("KAZIMO_PA
   Config.withDefault("on"),
   Config.map((mode) => (mode.trim().toLowerCase() === "off" ? null : { code: BOOT_PAIRING_CODE })),
 );
+
+const deviceTokenTable = (raw: string): Record<string, string[]> => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+  const table: Record<string, string[]> = {};
+  for (const [userId, value] of Object.entries(parsed)) {
+    if (!Array.isArray(value)) continue;
+    const tokens = value.filter(isRingDeviceToken).slice(0, RING_MAX_DEVICE_TOKENS);
+    if (tokens.length > 0) table[userId] = tokens;
+  }
+  return table;
+};
+
+const ring: Config.Config<RingConfig | null> = Config.all({
+  url: Config.string("KAZIMO_RING_URL"),
+  token: Config.string("KAZIMO_RING_TOKEN"),
+  callerName: Config.string("KAZIMO_RING_CALLER"),
+  deviceTokens: Config.string("KAZIMO_RING_DEVICES").pipe(Config.map(deviceTokenTable)),
+}).pipe(Config.option, Config.map(Option.getOrNull));
 
 const optionalStringList = (name: string) =>
   Config.string(name).pipe(
@@ -111,6 +143,7 @@ export const daemonConfig: Config.Config<DaemonConfig> = Config.all({
     threshold: Config.withDefault(Config.number("KAZIMO_WAKE_THRESHOLD"), 0.5),
     captureRmsMin: Config.withDefault(Config.number("KAZIMO_CAPTURE_RMS_MIN"), 130),
   }),
+  ring,
   chatTtlMs: Config.withDefault(Config.number("KAZIMO_CHAT_TTL"), 180).pipe(
     Config.map((seconds) => seconds * 1000),
   ),

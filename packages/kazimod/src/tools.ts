@@ -10,6 +10,7 @@ import { Effect, Schema } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
 import { KioskBridge } from "./bridge";
 import { type AgentConfig, daemonConfig } from "./config";
+import { ringContact } from "./ring";
 
 const FETCH_TIMEOUT_MS = 5000;
 const HEADLINES_PER_FEED = 20;
@@ -533,6 +534,7 @@ export const AgentToolkitLayer = AgentToolkit.toLayer(
           if (!bridge.send({ type: "place-call", roomId: match.contact.roomId })) {
             return { report: SCREEN_OFFLINE };
           }
+          ringContact(config.ring, match.contact, crypto.randomUUID());
           return { report: `Calling ${match.contact.displayName} now.`, screen: true };
         }),
       SendMessage: ({ to, text }) =>

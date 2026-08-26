@@ -92,6 +92,13 @@
         "@types/react-dom": "^19.1.0",
       },
     },
+    "packages/ring": {
+      "name": "@kazimo/ring",
+      "version": "0.0.1",
+      "dependencies": {
+        "@kazimo/shared": "workspace:*",
+      },
+    },
     "packages/shared": {
       "name": "@kazimo/shared",
       "version": "0.0.1",
@@ -435,6 +442,8 @@
     "@kazimo/kazimod": ["@kazimo/kazimod@workspace:packages/kazimod"],
 
     "@kazimo/kiosk": ["@kazimo/kiosk@workspace:packages/kiosk"],
+
+    "@kazimo/ring": ["@kazimo/ring@workspace:packages/ring"],
 
     "@kazimo/shared": ["@kazimo/shared@workspace:packages/shared"],
 
