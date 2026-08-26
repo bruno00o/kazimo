@@ -9,7 +9,10 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.kazimo.family"
+      "bundleIdentifier": "com.kazimo.family",
+      "entitlements": {
+        "aps-environment": "development"
+      }
     },
     "android": {
       "package": "com.kazimo.family",
