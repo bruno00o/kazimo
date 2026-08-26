@@ -6,14 +6,14 @@ import {
   type TaskHandleLike,
 } from "@unomed/react-native-matrix-sdk";
 import {
+  type CallEvents,
   callUuid,
   dismiss,
   dismissAll,
   markActive,
-  onCallEvent,
   ringIncoming,
   setupCallKeep,
-  takeBufferedCallEvents,
+  callEvents as sharedCallEvents,
 } from "./callkeep";
 import type { Strings } from "./i18n";
 import type { PendingRingCall, PendingRingCalls } from "./pending-calls";
@@ -33,13 +33,14 @@ export const startCallCenter = async (
   handlers: { onAnswer: (call: IncomingCall) => void; onRemoteEnd: (roomId: string) => void },
   strings: Strings,
   pending: PendingRingCalls | null = null,
+  events: CallEvents = sharedCallEvents,
 ): Promise<CallCenter> => {
   const me = client.userId();
   const byRoom = new Map<string, string>();
   const byUuid = new Map<string, IncomingCall>();
   const watchers = new Map<string, TaskHandleLike>();
+  const seenRemote = new Set<string>();
   let answeredRoomId: string | null = null;
-  let answeredPushUuid: string | null = null;
 
   await setupCallKeep(strings);
 
@@ -47,6 +48,7 @@ export const startCallCenter = async (
     const uuid = byRoom.get(roomId);
     if (uuid) byUuid.delete(uuid);
     byRoom.delete(roomId);
+    seenRemote.delete(roomId);
     pending?.forget(roomId);
     if (answeredRoomId === roomId) answeredRoomId = null;
   };
@@ -64,22 +66,24 @@ export const startCallCenter = async (
     };
   };
 
+  const register = (roomId: string, uuid: string, title: string): IncomingCall => {
+    const call = { roomId, title };
+    byRoom.set(roomId, uuid);
+    byUuid.set(uuid, call);
+    pending?.forget(roomId);
+    return call;
+  };
+
   const adopt = (info: RoomInfo, pushed: PendingRingCall) => {
     const { name } = callerOf(info);
-    const call = { roomId: info.id, title: name === info.id ? pushed.callerName : name };
-    byRoom.set(info.id, pushed.uuid);
-    byUuid.set(pushed.uuid, call);
-    pending?.forget(info.id);
-    if (answeredPushUuid !== pushed.uuid) return;
-    answeredPushUuid = null;
-    answeredRoomId = info.id;
-    handlers.onAnswer(call);
+    register(info.id, pushed.uuid, name === info.id ? pushed.callerName : name);
   };
 
   const sync = (info: RoomInfo) => {
     if (info.membership !== Membership.Joined) return;
     const remote = remoteInCall(info);
     const uuid = byRoom.get(info.id);
+    if (remote) seenRemote.add(info.id);
     if (remote && !uuid) {
       const pushed = pending?.forRoom(info.id) ?? null;
       if (pushed) {
@@ -88,12 +92,11 @@ export const startCallCenter = async (
       }
       const fresh = callUuid();
       const { handle, name } = callerOf(info);
-      byRoom.set(info.id, fresh);
-      byUuid.set(fresh, { roomId: info.id, title: name });
+      register(info.id, fresh, name);
       ringIncoming(fresh, handle, name, INCOMING_DEFAULT_HAS_VIDEO);
       return;
     }
-    if (!remote && uuid) {
+    if (!remote && uuid && seenRemote.has(info.id)) {
       dismiss(uuid);
       const wasAnswered = answeredRoomId === info.id;
       clear(info.id);
@@ -114,7 +117,6 @@ export const startCallCenter = async (
     for (const room of client.rooms()) watch(room);
     for (const stale of pending?.expire() ?? []) {
       if (byRoom.get(stale.roomId) === stale.uuid) continue;
-      if (answeredPushUuid === stale.uuid) answeredPushUuid = null;
       dismiss(stale.uuid);
     }
   };
@@ -126,14 +128,15 @@ export const startCallCenter = async (
     dismiss(pushed.uuid);
   };
 
+  const fromPush = (uuid: string): IncomingCall | null => {
+    const pushed = pending?.forUuid(uuid);
+    return pushed ? register(pushed.roomId, uuid, pushed.callerName) : null;
+  };
+
   const answered = (uuid: string) => {
-    const call = byUuid.get(uuid);
-    if (!call) {
-      if (!pending?.forUuid(uuid)) return;
-      answeredPushUuid = uuid;
-      markActive(uuid);
-      return;
-    }
+    const call = byUuid.get(uuid) ?? fromPush(uuid);
+    if (!call) return;
+    if (answeredRoomId === call.roomId) return;
     answeredRoomId = call.roomId;
     markActive(uuid);
     handlers.onAnswer(call);
@@ -144,7 +147,6 @@ export const startCallCenter = async (
     if (!call) {
       const pushed = pending?.forUuid(uuid);
       if (!pushed) return;
-      if (answeredPushUuid === uuid) answeredPushUuid = null;
       pending?.forget(pushed.roomId);
       return;
     }
@@ -153,17 +155,11 @@ export const startCallCenter = async (
     if (wasAnswered) handlers.onRemoteEnd(call.roomId);
   };
 
-  const offAnswer = onCallEvent("answerCall", answered);
-  const offEnd = onCallEvent("endCall", ended);
   const offPush = pending?.watch(dropDuplicate) ?? (() => {});
 
   scan();
   const scanner = setInterval(scan, ROOM_SCAN_INTERVAL_MS);
-  void takeBufferedCallEvents()
-    .then((buffered) => {
-      for (const { event, uuid } of buffered) (event === "answerCall" ? answered : ended)(uuid);
-    })
-    .catch(() => {});
+  const offEvents = events.take(({ event, uuid }) => (event === "answerCall" ? answered : ended)(uuid));
 
   return {
     hangup(roomId) {
@@ -175,14 +171,13 @@ export const startCallCenter = async (
       clearInterval(scanner);
       for (const watcher of watchers.values()) watcher.cancel();
       watchers.clear();
-      offAnswer();
-      offEnd();
+      offEvents();
       offPush();
       dismissAll();
       byRoom.clear();
       byUuid.clear();
+      seenRemote.clear();
       answeredRoomId = null;
-      answeredPushUuid = null;
     },
   };
 };

@@ -98,7 +98,7 @@ export const joinRtc = async (client: ClientLike, roomId: string, serviceUrl: st
     membershipID: `${userId}:${deviceId}`,
     expires: MEMBERSHIP_EXPIRY_MS,
     focus_active: { type: LIVEKIT_FOCUS_TYPE, focus_selection: OLDEST_MEMBERSHIP_SELECTION },
-    foci_preferred: [{ type: LIVEKIT_FOCUS_TYPE, livekit_service_url: serviceUrl }],
+    foci_preferred: [{ type: LIVEKIT_FOCUS_TYPE, livekit_service_url: serviceUrl, livekit_alias: roomId }],
   });
 };
 

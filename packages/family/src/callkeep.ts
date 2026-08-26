@@ -4,11 +4,29 @@ import type { Strings } from "./i18n";
 
 export type CallKeepEvent = "answerCall" | "endCall";
 
-export type BufferedCallEvent = { event: CallKeepEvent; uuid: string };
+export type AudioSessionEvent = "didActivateAudioSession" | "didDeactivateAudioSession";
 
-const NATIVE_EVENT_NAMES: Record<CallKeepEvent, string> = {
+export type CallEvent = { event: CallKeepEvent; uuid: string };
+
+export type ReplayedEvent = { call: CallEvent } | { audioSession: AudioSessionEvent };
+
+export type CallEvents = {
+  start: (onAudioSession: (event: AudioSessionEvent) => void) => void;
+  take: (sink: (event: CallEvent) => void) => () => void;
+};
+
+const CALL_EVENTS: CallKeepEvent[] = ["answerCall", "endCall"];
+
+const AUDIO_SESSION_EVENTS: AudioSessionEvent[] = ["didActivateAudioSession", "didDeactivateAudioSession"];
+
+const NATIVE_CALL_EVENT_NAMES: Record<CallKeepEvent, string> = {
   answerCall: "RNCallKeepPerformAnswerCallAction",
   endCall: "RNCallKeepPerformEndCallAction",
+};
+
+const NATIVE_AUDIO_SESSION_EVENT_NAMES: Record<AudioSessionEvent, string> = {
+  didActivateAudioSession: "RNCallKeepDidActivateAudioSession",
+  didDeactivateAudioSession: "RNCallKeepDidDeactivateAudioSession",
 };
 
 const CALL_AUDIO_CATEGORY_OPTIONS =
@@ -16,6 +34,15 @@ const CALL_AUDIO_CATEGORY_OPTIONS =
   AudioSessionCategoryOption.allowBluetoothA2DP |
   AudioSessionCategoryOption.allowAirPlay |
   AudioSessionCategoryOption.defaultToSpeaker;
+
+const SINGLE_CALL_OPTIONS = {
+  ios: {
+    supportsHolding: false,
+    supportsDTMF: false,
+    supportsGrouping: false,
+    supportsUngrouping: false,
+  },
+};
 
 export const setupCallKeep = async (strings: Strings): Promise<void> => {
   await RNCallKeep.setup({
@@ -46,7 +73,7 @@ export const setupCallKeep = async (strings: Strings): Promise<void> => {
 };
 
 export const ringIncoming = (uuid: string, handle: string, name: string, hasVideo: boolean): void => {
-  RNCallKeep.displayIncomingCall(uuid, handle, name, "generic", hasVideo);
+  RNCallKeep.displayIncomingCall(uuid, handle, name, "generic", hasVideo, SINGLE_CALL_OPTIONS);
 };
 
 export const markActive = (uuid: string): void => {
@@ -62,25 +89,69 @@ export const dismissAll = (): void => {
   RNCallKeep.endAllCalls();
 };
 
-export const onCallEvent = (event: CallKeepEvent, handler: (uuid: string) => void): (() => void) => {
-  const listener = ({ callUUID }: { callUUID: string }) => handler(callUUID.toUpperCase());
-  RNCallKeep.addEventListener(event, listener);
-  return () => RNCallKeep.removeEventListener(event);
-};
-
-export const takeBufferedCallEvents = async (): Promise<BufferedCallEvent[]> => {
-  const buffered = await RNCallKeep.getInitialEvents().catch(() => []);
-  RNCallKeep.clearInitialEvents();
-  const replay: BufferedCallEvent[] = [];
+export const replayedCallKeepEvents = (
+  buffered: readonly { name?: unknown; data?: unknown }[],
+): ReplayedEvent[] => {
+  const replay: ReplayedEvent[] = [];
   for (const entry of buffered) {
+    for (const event of AUDIO_SESSION_EVENTS) {
+      if (entry.name === NATIVE_AUDIO_SESSION_EVENT_NAMES[event]) replay.push({ audioSession: event });
+    }
     const uuid = (entry.data as { callUUID?: string } | undefined)?.callUUID;
     if (typeof uuid !== "string") continue;
-    for (const event of ["answerCall", "endCall"] as const) {
-      if (entry.name === NATIVE_EVENT_NAMES[event]) replay.push({ event, uuid: uuid.toUpperCase() });
+    for (const event of CALL_EVENTS) {
+      if (entry.name === NATIVE_CALL_EVENT_NAMES[event]) {
+        replay.push({ call: { event, uuid: uuid.toUpperCase() } });
+      }
     }
   }
   return replay;
 };
+
+export const createCallEvents = (): CallEvents => {
+  const queued: CallEvent[] = [];
+  let sink: ((event: CallEvent) => void) | null = null;
+  let audioSink: ((event: AudioSessionEvent) => void) | null = null;
+
+  const takeCall = (call: CallEvent) => {
+    if (sink) sink(call);
+    else queued.push(call);
+  };
+
+  const replay = (replayed: ReplayedEvent) => {
+    if ("call" in replayed) takeCall(replayed.call);
+    else audioSink?.(replayed.audioSession);
+  };
+
+  return {
+    start(onAudioSession) {
+      audioSink = onAudioSession;
+      for (const event of CALL_EVENTS) {
+        RNCallKeep.addEventListener(event, ({ callUUID }) =>
+          takeCall({ event, uuid: callUUID.toUpperCase() }),
+        );
+      }
+      for (const event of AUDIO_SESSION_EVENTS) {
+        RNCallKeep.addEventListener(event, () => audioSink?.(event));
+      }
+      void RNCallKeep.getInitialEvents()
+        .then((buffered) => {
+          RNCallKeep.clearInitialEvents();
+          for (const replayed of replayedCallKeepEvents(buffered)) replay(replayed);
+        })
+        .catch(() => {});
+    },
+    take(next) {
+      sink = next;
+      for (const call of queued.splice(0, queued.length)) next(call);
+      return () => {
+        if (sink === next) sink = null;
+      };
+    },
+  };
+};
+
+export const callEvents = createCallEvents();
 
 export const callUuid = (): string => {
   const bytes = new Uint8Array(16);

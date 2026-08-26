@@ -61,7 +61,7 @@ mock.module("react-native-callkeep", () => ({
 
 const { startCallCenter } = await import("./calls");
 const { createPendingRingCalls } = await import("./pending-calls");
-const { callUuid } = await import("./callkeep");
+const { callUuid, createCallEvents, replayedCallKeepEvents } = await import("./callkeep");
 
 const ME = "@ana:kazimo.dev";
 const CALLER = "@vovo:kazimo.dev";
@@ -102,16 +102,21 @@ const harness = async (pending: ReturnType<typeof createPendingRingCalls> | null
   const client = { userId: () => ME, rooms: () => [room] };
   const answers: { roomId: string; title: string }[] = [];
   const remoteEnds: string[] = [];
+  const audioSessions: string[] = [];
+  const events = createCallEvents();
+  events.start((event) => audioSessions.push(event));
   const center = await startCallCenter(
     client as never,
     { onAnswer: (call) => answers.push(call), onRemoteEnd: (roomId) => remoteEnds.push(roomId) },
     {} as never,
     pending,
+    events,
   );
   return {
     center,
     answers,
     remoteEnds,
+    audioSessions,
     sync: (ringing: boolean) => notify?.(roomInfo(ringing)),
     answer: (uuid: string) => calls.listeners.get("answerCall")?.({ callUUID: uuid }),
     end: (uuid: string) => calls.listeners.get("endCall")?.({ callUUID: uuid }),
@@ -163,16 +168,45 @@ describe("startCallCenter adopting a pushed call", () => {
     app.center.stop();
   });
 
-  test("answering before the sync catches up still opens the call", async () => {
+  test("answering opens the call from the push payload without waiting for the sync", async () => {
+    const pending = createPendingRingCalls();
+    pending.remember(push({ callerName: "Avo" }), NOW);
+    const app = await harness(pending);
+    app.answer(PUSHED_UUID);
+    expect(calls.active).toEqual([PUSHED_UUID]);
+    expect(app.answers).toEqual([{ roomId: ROOM, title: "Avo" }]);
+    expect(pending.forRoom(ROOM, NOW)).toBeNull();
+    app.center.stop();
+  });
+
+  test("a sync landing after the pushed answer neither rings again nor answers twice", async () => {
     const pending = createPendingRingCalls();
     pending.remember(push(), NOW);
     const app = await harness(pending);
     app.answer(PUSHED_UUID);
-    expect(calls.active).toEqual([PUSHED_UUID]);
-    expect(app.answers).toEqual([]);
     app.sync(true);
-    expect(app.answers).toEqual([{ roomId: ROOM, title: "Vovo" }]);
     expect(calls.displayed).toEqual([]);
+    expect(app.answers).toHaveLength(1);
+    app.center.stop();
+  });
+
+  test("hanging up an answered pushed call ends the callkit call", async () => {
+    const pending = createPendingRingCalls();
+    pending.remember(push(), NOW);
+    const app = await harness(pending);
+    app.answer(PUSHED_UUID);
+    app.center.hangup(ROOM);
+    expect(calls.ended).toEqual([PUSHED_UUID]);
+    app.center.stop();
+  });
+
+  test("callkit ending an answered pushed call sends the screen back", async () => {
+    const pending = createPendingRingCalls();
+    pending.remember(push(), NOW);
+    const app = await harness(pending);
+    app.answer(PUSHED_UUID);
+    app.end(PUSHED_UUID);
+    expect(app.remoteEnds).toEqual([ROOM]);
     app.center.stop();
   });
 
@@ -186,7 +220,6 @@ describe("startCallCenter adopting a pushed call", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(calls.active).toEqual([PUSHED_UUID]);
-    app.sync(true);
     expect(app.answers).toEqual([{ roomId: ROOM, title: "Vovo" }]);
     app.center.stop();
   });
@@ -231,5 +264,68 @@ describe("startCallCenter adopting a pushed call", () => {
 describe("callUuid", () => {
   test("hands out uppercase v4 uuids", () => {
     expect(callUuid()).toMatch(/^[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$/);
+  });
+});
+
+describe("replayedCallKeepEvents", () => {
+  test("maps the native names and uppercases the uuid", () => {
+    expect(
+      replayedCallKeepEvents([
+        { name: "RNCallKeepDidActivateAudioSession" },
+        { name: "RNCallKeepPerformAnswerCallAction", data: { callUUID: CALL_ID.toLowerCase() } },
+        { name: "RNCallKeepPerformEndCallAction", data: { callUUID: CALL_ID.toLowerCase() } },
+        { name: "RNCallKeepDidDeactivateAudioSession" },
+      ]),
+    ).toEqual([
+      { audioSession: "didActivateAudioSession" },
+      { call: { event: "answerCall", uuid: PUSHED_UUID } },
+      { call: { event: "endCall", uuid: PUSHED_UUID } },
+      { audioSession: "didDeactivateAudioSession" },
+    ]);
+  });
+
+  test("drops entries that carry no usable uuid", () => {
+    expect(
+      replayedCallKeepEvents([
+        { name: "RNCallKeepPerformAnswerCallAction" },
+        { name: "RNCallKeepDidDisplayIncomingCall", data: { callUUID: CALL_ID } },
+        { name: 7, data: { callUUID: CALL_ID } },
+      ]),
+    ).toEqual([]);
+  });
+});
+
+describe("createCallEvents", () => {
+  test("hands the audio session straight to the handoff and holds the call events", async () => {
+    const events = createCallEvents();
+    const audioSessions: string[] = [];
+    const seen: { event: string; uuid: string }[] = [];
+    events.start((event) => audioSessions.push(event));
+    calls.listeners.get("didActivateAudioSession")?.({ callUUID: "" });
+    calls.listeners.get("answerCall")?.({ callUUID: CALL_ID.toLowerCase() });
+    expect(audioSessions).toEqual(["didActivateAudioSession"]);
+    expect(seen).toEqual([]);
+    const off = events.take((call) => seen.push(call));
+    expect(seen).toEqual([{ event: "answerCall", uuid: PUSHED_UUID }]);
+    calls.listeners.get("endCall")?.({ callUUID: CALL_ID.toLowerCase() });
+    expect(seen).toHaveLength(2);
+    off();
+    calls.listeners.get("endCall")?.({ callUUID: CALL_ID.toLowerCase() });
+    expect(seen).toHaveLength(2);
+    await Promise.resolve();
+  });
+
+  test("replays what callkeep buffered before the bundle was running", async () => {
+    calls.buffered = [
+      { name: "RNCallKeepPerformAnswerCallAction", data: { callUUID: CALL_ID.toLowerCase() } },
+    ];
+    const events = createCallEvents();
+    events.start(() => undefined);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(calls.buffered).toEqual([]);
+    const seen: { event: string; uuid: string }[] = [];
+    events.take((call) => seen.push(call));
+    expect(seen).toEqual([{ event: "answerCall", uuid: PUSHED_UUID }]);
   });
 });

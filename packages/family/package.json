@@ -34,7 +34,7 @@
     "expo-status-bar": "~57.0.1",
     "expo-symbols": "~57.0.2",
     "expo-web-browser": "~57.0.2",
-    "livekit-client": "^2.19.0",
+    "livekit-client": "2.22.0",
     "react": "19.2.3",
     "react-native": "0.86.2",
     "react-native-blurhash": "^2.1.3",

@@ -23,6 +23,7 @@ import {
   View,
 } from "react-native";
 import { joinRtc, leaveRtc, rtcFocusUrl, type SfuToken, sfuToken } from "./call";
+import { CALL_AUDIO_SESSION } from "./call-audio";
 import { GRID_GAP, gridFor, visibleRemoteCount } from "./callLayout";
 import { Icon, type IconName } from "./Icon";
 import type { Strings } from "./i18n";
@@ -36,12 +37,11 @@ const HANG_UP_ICON_SIZE = 28;
 const FRONT_FACING = "front";
 const IOS_SPEAKER_OUTPUT = "force_speaker";
 const IOS_ROUTED_OUTPUT = "default";
-const SHARED_CATEGORY_OPTIONS: AppleAudioCategoryOption[] = [
-  "allowBluetooth",
-  "allowBluetoothA2DP",
-  "allowAirPlay",
-];
 const SPEAKER_CATEGORY_OPTION: AppleAudioCategoryOption = "defaultToSpeaker";
+const SPEAKER_CATEGORY_OPTIONS = CALL_AUDIO_SESSION.audioCategoryOptions ?? [];
+const ROUTED_CATEGORY_OPTIONS = SPEAKER_CATEGORY_OPTIONS.filter(
+  (option) => option !== SPEAKER_CATEGORY_OPTION,
+);
 
 const stateLabel = (strings: Strings): Record<ConnectionState, string> => ({
   [ConnectionState.Disconnected]: strings.stateDisconnected,
@@ -51,24 +51,20 @@ const stateLabel = (strings: Strings): Record<ConnectionState, string> => ({
   [ConnectionState.SignalReconnecting]: strings.stateReconnecting,
 });
 
-const appleAudioConfiguration = (video: boolean, speakerOn: boolean): AppleAudioConfiguration => ({
-  audioCategory: "playAndRecord",
-  audioCategoryOptions: speakerOn
-    ? [...SHARED_CATEGORY_OPTIONS, SPEAKER_CATEGORY_OPTION]
-    : SHARED_CATEGORY_OPTIONS,
-  audioMode: video ? "videoChat" : "voiceChat",
+const appleAudioConfiguration = (speakerOn: boolean): AppleAudioConfiguration => ({
+  ...CALL_AUDIO_SESSION,
+  audioCategoryOptions: speakerOn ? SPEAKER_CATEGORY_OPTIONS : ROUTED_CATEGORY_OPTIONS,
 });
 
-const applyAudioRoute = async (video: boolean, speakerOn: boolean): Promise<void> => {
+const applyAudioRoute = async (speakerOn: boolean): Promise<void> => {
   if (Platform.OS !== "ios") return;
-  await AudioSession.setAppleAudioConfiguration(appleAudioConfiguration(video, speakerOn));
+  await AudioSession.setAppleAudioConfiguration(appleAudioConfiguration(speakerOn));
   await AudioSession.selectAudioOutput(speakerOn ? IOS_SPEAKER_OUTPUT : IOS_ROUTED_OUTPUT);
 };
 
-const startCallAudio = async (video: boolean): Promise<void> => {
-  await AudioSession.configureAudio({ ios: { defaultOutput: video ? "speaker" : "earpiece" } });
+const startCallAudio = async (speakerOn: boolean): Promise<void> => {
   await AudioSession.startAudioSession();
-  await applyAudioRoute(video, video);
+  await applyAudioRoute(speakerOn);
 };
 
 const activeVideoDevice = (
@@ -112,6 +108,8 @@ export function CallView({
 }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const published = useRef(false);
+  const clientRef = useRef(client);
+  clientRef.current = client;
 
   useEffect(() => {
     void startCallAudio(initialVideo).catch(() => {});
@@ -125,10 +123,10 @@ export function CallView({
     (async () => {
       try {
         const serviceUrl = await rtcFocusUrl(homeserver);
-        const token = await sfuToken(serviceUrl, client, roomId);
+        const token = await sfuToken(serviceUrl, clientRef.current, roomId);
         if (cancelled) return;
         published.current = true;
-        await joinRtc(client, roomId, serviceUrl);
+        await joinRtc(clientRef.current, roomId, serviceUrl);
         if (cancelled) return;
         setLoad({ kind: "ready", token });
       } catch (error) {
@@ -141,10 +139,10 @@ export function CallView({
       cancelled = true;
       if (published.current) {
         published.current = false;
-        void leaveRtc(client, roomId).catch(() => {});
+        void leaveRtc(clientRef.current, roomId).catch(() => {});
       }
     };
-  }, [client, homeserver, roomId]);
+  }, [homeserver, roomId]);
 
   if (load.kind === "loading") {
     return (
@@ -261,8 +259,8 @@ function Stage({
   const toggleSpeaker = useCallback(() => {
     const next = !speakerOn;
     setSpeakerOn(next);
-    void applyAudioRoute(initialVideo, next).catch(() => {});
-  }, [speakerOn, initialVideo]);
+    void applyAudioRoute(next).catch(() => {});
+  }, [speakerOn]);
 
   return (
     <View style={styles.stage}>

@@ -1,7 +1,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
-const { withAppDelegate, withDangerousMod, withXcodeProject } = require("expo/config-plugins");
+const { withAppDelegate, withDangerousMod, withInfoPlist, withXcodeProject } = require("expo/config-plugins");
 
+const BACKGROUND_MODES = ["audio", "voip"];
 const HEADER_SEARCH_PATH = `"$(SRCROOT)/../node_modules/react-native-voip-push-notification/ios/RNVoipPushNotification"`;
 const BRIDGING_IMPORTS = ['#import "RNVoipPushNotificationManager.h"', '#import "RNCallKeep.h"'];
 const PUSHKIT_IMPORT = "import PushKit";
@@ -90,6 +91,16 @@ const withVoipHeaderSearchPath = (config) =>
     return cfg;
   });
 
+const withVoipBackgroundModes = (config) =>
+  withInfoPlist(config, (cfg) => {
+    const declared = Array.isArray(cfg.modResults.UIBackgroundModes) ? cfg.modResults.UIBackgroundModes : [];
+    cfg.modResults.UIBackgroundModes = [
+      ...declared,
+      ...BACKGROUND_MODES.filter((mode) => !declared.includes(mode)),
+    ];
+    return cfg;
+  });
+
 const withVoipBridgingHeader = (config) =>
   withDangerousMod(config, [
     "ios",
@@ -122,4 +133,5 @@ const withVoipAppDelegate = (config) =>
     return cfg;
   });
 
-module.exports = (config) => withVoipAppDelegate(withVoipBridgingHeader(withVoipHeaderSearchPath(config)));
+module.exports = (config) =>
+  withVoipAppDelegate(withVoipBridgingHeader(withVoipBackgroundModes(withVoipHeaderSearchPath(config))));
