@@ -226,8 +226,9 @@ function Stage({
   const room = useRoomContext();
 
   useEffect(() => {
+    if (state !== ConnectionState.Connected) return;
     channelRef.current?.attach(encryption.sessionFor(room));
-  }, [room, encryption, channelRef]);
+  }, [state, room, encryption, channelRef]);
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant();
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const participants = useParticipants();

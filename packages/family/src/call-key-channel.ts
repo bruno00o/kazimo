@@ -248,6 +248,7 @@ export const startCallKeys = async (client: ClientLike, roomId: string): Promise
       console.log(`${LOG} media session attached`, remotes);
       for (const identity of remotes) shareWithIdentity(identity);
       unwatch = media.watchRemotes(shareWithIdentity);
+      void enableOutgoing();
     },
     stop: () => {
       store.detach();
