@@ -91,7 +91,10 @@ const ring: Config.Config<RingConfig | null> = Config.all({
   url: Config.string("KAZIMO_RING_URL"),
   token: Config.string("KAZIMO_RING_TOKEN"),
   callerName: Config.string("KAZIMO_RING_CALLER"),
-  deviceTokens: Config.string("KAZIMO_RING_DEVICES").pipe(Config.map(deviceTokenTable)),
+  deviceTokens: Config.string("KAZIMO_RING_DEVICES").pipe(
+    Config.withDefault(""),
+    Config.map(deviceTokenTable),
+  ),
 }).pipe(Config.option, Config.map(Option.getOrNull));
 
 const optionalStringList = (name: string) =>

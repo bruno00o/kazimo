@@ -10,6 +10,7 @@ import {
 } from "@kazimo/shared";
 import type { ClientLike } from "@unomed/react-native-matrix-sdk";
 import { authorizedFetch } from "./http";
+import { existingDirectRoom } from "./rooms";
 
 type Sdk = typeof import("@unomed/react-native-matrix-sdk");
 
@@ -21,6 +22,7 @@ const CREATE_EVENT_TYPE = "m.room.create";
 const POWER_LEVELS_EVENT_TYPE = "m.room.power_levels";
 const CONTROL_MARKER_STATE_KEY = "";
 const REMOVED_CONTACT_CONTENT = {};
+const DIRECT_MEMBER_LIMIT = 2n;
 
 const USER_ID = /^@[^\s:]+:[^\s:]+(?::[0-9]{1,5})?$/;
 const ROOM_ID = /^![^\s:]+:[^\s:]+(?::[0-9]{1,5})?$/;
@@ -98,7 +100,7 @@ const roomState = async (client: ClientLike, roomId: string): Promise<unknown> =
   return res.json();
 };
 
-const putRoomState = async (
+export const putRoomState = async (
   client: ClientLike,
   roomId: string,
   eventType: string,
@@ -186,7 +188,7 @@ const inviteUser = async (client: ClientLike, roomId: string, userId: string): P
   if (!res.ok) throw new Error(`invite ${res.status}`);
 };
 
-const roomStateContent = async (
+export const roomStateContent = async (
   client: ClientLike,
   roomId: string,
   eventType: string,
@@ -227,6 +229,31 @@ const managedElsewhere = async (client: ClientLike): Promise<boolean> => {
     if (state !== null && adminSignalOf(state)) return true;
   }
   return false;
+};
+
+export const frameMarkerOf = (payload: unknown): boolean =>
+  stateEventsOf(payload).some((event) => event.type === FRAME_EVENT_TYPE && event.stateKey === "");
+
+const scanFrameDirectRoom = async (client: ClientLike): Promise<string | null> => {
+  const { Membership } = await sdk();
+  for (const room of client.rooms()) {
+    if (room.membership() !== Membership.Joined) continue;
+    const info = await room.roomInfo().catch(() => null);
+    if (!info) continue;
+    if (!info.isDirect && info.activeMembersCount > DIRECT_MEMBER_LIMIT) continue;
+    const state = await roomState(client, room.id()).catch(() => null);
+    if (state !== null && frameMarkerOf(state)) return room.id();
+  }
+  return null;
+};
+
+export const frameDirectRoom = async (client: ClientLike): Promise<string | null> => {
+  const link = await frameLink(client).catch(() => null);
+  if (link) {
+    const known = await existingDirectRoom(client, link.frameUserId).catch(() => null);
+    if (known) return known;
+  }
+  return scanFrameDirectRoom(client);
 };
 
 export type FrameAccess = { link: FrameLink | null; adminElsewhere: boolean };

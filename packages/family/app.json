@@ -28,6 +28,7 @@
       "@livekit/react-native-expo-plugin",
       "@config-plugins/react-native-webrtc",
       "@config-plugins/react-native-callkeep",
+      "./plugins/withVoipPush",
       "./plugins/withIosBuildFix",
       "expo-localization",
       "expo-router",

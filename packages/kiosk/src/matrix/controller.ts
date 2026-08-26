@@ -7,6 +7,7 @@ import {
   CONTROL_EVENT_TYPE,
   type Contact,
   codesMatch,
+  contactStateKeyOf,
   FRAME_EVENT_TYPE,
   type FrameContact,
   type HistoryMessage,
@@ -15,6 +16,8 @@ import {
   type Person,
   type PhotoRef,
   type PhotosResult,
+  RING_EVENT_TYPE,
+  type RingDevices,
 } from "@kazimo/shared";
 import { initAsync as initCryptoWasm } from "@matrix-org/matrix-sdk-crypto-wasm";
 import {
@@ -57,6 +60,7 @@ import {
 import { ensureCryptoIdentity, secretStorageCallbacks } from "./crypto";
 import { plainMediaUrl } from "./media";
 import { captionOf, loadRecentPhotos, photoFromEvent } from "./photos";
+import { type RingStateEntry, ringContentWithoutTokens, ringDevicesByUser, ringDevicesDiffer } from "./ring";
 
 const PHOTO_ROTATE_MS = 30_000;
 const PHOTO_POOL_SIZE = 20;
@@ -86,6 +90,7 @@ export interface KioskCallbacks {
   setNight: (night: boolean) => void;
   reportActivity: (activity: ActivitySummary) => void;
   reportContacts: (contacts: Contact[]) => void;
+  reportRingDevices: (devices: RingDevices) => void;
   reportPaired: (paired: boolean) => void;
   announce: (announcement: Announcement) => void;
 }
@@ -99,6 +104,7 @@ export interface KioskHandle {
   sendMessage: (roomId: string, text: string) => void;
   showPhotos: (userId: string | null) => Promise<PhotosResult>;
   history: (roomId: string, limit: number) => Promise<HistoryMessage[]>;
+  dropRingTokens: (userId: string, tokens: string[]) => void;
 }
 
 const INTERRUPTIBLE_MODES = new Set<KioskState["kind"]>(["idle", "message", "assistant"]);
@@ -127,6 +133,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
   let sendMessageSink: ((roomId: string, text: string) => void) | null = null;
   let showPhotosSink: ((userId: string | null) => Promise<PhotosResult>) | null = null;
   let historySink: ((roomId: string, limit: number) => Promise<HistoryMessage[]>) | null = null;
+  let ringStaleSink: ((userId: string, tokens: string[]) => void) | null = null;
   let pairingAttempts = 0;
   const timers = new Set<ReturnType<typeof setTimeout>>();
 
@@ -572,6 +579,45 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
           .map((member) => member.userId),
       }));
 
+    const ringStateEntries = (): RingStateEntry[] => {
+      const entries: RingStateEntry[] = [];
+      for (const [peerUserId, roomId] of directRoomsByPeer(roomViews(), config.userId)) {
+        const room = matrix.getRoom(roomId);
+        if (!room) continue;
+        for (const event of room.currentState.getStateEvents(RING_EVENT_TYPE)) {
+          entries.push({ peerUserId, stateKey: event.getStateKey() ?? "", content: event.getContent() });
+        }
+      }
+      return entries;
+    };
+
+    let ringDevices: RingDevices = {};
+    const reportRingDevices = () => {
+      const next = ringDevicesByUser(ringStateEntries());
+      if (!ringDevicesDiffer(ringDevices, next)) return;
+      ringDevices = next;
+      callbacks.reportRingDevices(next);
+    };
+
+    ringStaleSink = (userId, tokens) => {
+      const roomId = directRoomsByPeer(roomViews(), config.userId).get(userId);
+      const room = roomId ? matrix.getRoom(roomId) : null;
+      if (!room || !roomId) return;
+      const stateKey = contactStateKeyOf(userId);
+      const current = room.currentState.getStateEvents(RING_EVENT_TYPE, stateKey)?.getContent();
+      const next = ringContentWithoutTokens(current, tokens);
+      if (!next) return;
+      void matrix
+        .sendStateEvent(
+          roomId,
+          RING_EVENT_TYPE as keyof StateEvents,
+          next as unknown as StateEvents[keyof StateEvents],
+          stateKey,
+        )
+        .then(() => reportRingDevices())
+        .catch((error) => console.error(`ring device pruning failed for ${userId}`, error));
+    };
+
     const repairControlPowerLevels = async () => {
       const room = controlRoomId ? matrix.getRoom(controlRoomId) : null;
       const current = room?.currentState.getStateEvents(EventType.RoomPowerLevels, "");
@@ -667,6 +713,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
           }
           await publishFrameStatus();
           reportContacts();
+          reportRingDevices();
         } while (reconcileRequested && !stopped);
       } finally {
         reconciling = false;
@@ -687,6 +734,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       if (stopped) return;
       if (event.getRoomId() === controlRoomId) scheduleReconcile();
       reportContacts();
+      reportRingDevices();
     });
 
     matrix.on(ClientEvent.Sync, (syncState) => {
@@ -701,6 +749,10 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       if (stopped) return;
       if (event.getType() === CONTACT_EVENT_TYPE) {
         if (event.getRoomId() === controlRoomId) scheduleReconcile();
+        return;
+      }
+      if (event.getType() === RING_EVENT_TYPE) {
+        reportRingDevices();
         return;
       }
       if (!RTC_MEMBER_TYPES.has(event.getType())) return;
@@ -748,6 +800,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
             scheduleReconcile();
           }
           reportContacts();
+          reportRingDevices();
           if (mode === "idle") showIdle();
         })
         .catch((error) => console.error(`auto-join failed for ${room.roomId}`, error));
@@ -775,6 +828,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
     controlRoomId = findControlRoom();
     callbacks.reportPaired(controlRoomId !== null);
     reportContacts();
+    reportRingDevices();
     showIdle();
     if (controlRoomId) void reconcileContacts();
 
@@ -821,6 +875,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       sendMessageSink = null;
       showPhotosSink = null;
       historySink = null;
+      ringStaleSink = null;
       for (const timer of timers) clearTimeout(timer);
       timers.clear();
       void callHost?.hangup();
@@ -848,6 +903,9 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
     },
     history(roomId, limit) {
       return historySink ? historySink(roomId, limit) : Promise.resolve([]);
+    },
+    dropRingTokens(userId, tokens) {
+      ringStaleSink?.(userId, tokens);
     },
   };
 }

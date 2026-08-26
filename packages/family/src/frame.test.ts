@@ -4,6 +4,7 @@ import {
   contactsOf,
   frameLinkFromState,
   frameLinkOf,
+  frameMarkerOf,
   stateEventsOf,
   withAdminPower,
 } from "./frame";
@@ -154,6 +155,16 @@ describe("adminSignalOf", () => {
     expect(adminSignalOf([stateEvent("dev.kazimo.frame", "extra", { hasAdmin: true })])).toBe(false);
     expect(adminSignalOf([created(), marker()])).toBe(false);
     expect(adminSignalOf(undefined)).toBe(false);
+  });
+});
+
+describe("frameMarkerOf", () => {
+  test("true for any root frame status event, admin or not", () => {
+    expect(frameMarkerOf([stateEvent("dev.kazimo.frame", "", { hasAdmin: false })])).toBe(true);
+    expect(frameMarkerOf([stateEvent("dev.kazimo.frame", "", {})])).toBe(true);
+    expect(frameMarkerOf([stateEvent("dev.kazimo.frame", "extra", { hasAdmin: true })])).toBe(false);
+    expect(frameMarkerOf([created(), marker()])).toBe(false);
+    expect(frameMarkerOf(undefined)).toBe(false);
   });
 });
 

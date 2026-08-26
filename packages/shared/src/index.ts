@@ -24,6 +24,7 @@ export {
 export {
   isRingDeviceToken,
   parseRingRequest,
+  RING_EVENT_TYPE,
   RING_MAX_CALL_ID_LENGTH,
   RING_MAX_CALLER_NAME_LENGTH,
   RING_MAX_DEVICE_TOKENS,
@@ -31,13 +32,20 @@ export {
   RING_PATH,
   RING_PAYLOAD_VERSION,
   RING_STALE_REASONS,
+  type RingDevice,
+  type RingDevicesContent,
   type RingErrorCode,
   type RingErrorResponse,
   type RingPushPayload,
   type RingRequest,
   type RingResponse,
   type RingResult,
+  ringDeviceIsCurrent,
+  ringDevicesOf,
   ringTokenIsStale,
+  ringTokensOf,
+  withoutRingTokens,
+  withRingDevice,
 } from "./ring";
 export { type Tokens, tokens } from "./tokens";
 
@@ -91,6 +99,8 @@ export interface Contact {
   roomId: string;
 }
 
+export type RingDevices = Record<string, string[]>;
+
 export interface HistoryMessage {
   from: string;
   kind: "text" | "photo";
@@ -130,7 +140,8 @@ export type DaemonToKiosk =
   | { type: "place-call"; roomId: string }
   | { type: "send-message"; roomId: string; text: string }
   | { type: "show-photos"; id: number; userId: string | null }
-  | { type: "history-request"; id: number; roomId: string; limit: number };
+  | { type: "history-request"; id: number; roomId: string; limit: number }
+  | { type: "ring-stale"; userId: string; tokens: string[] };
 
 export type KioskToDaemon =
   | { type: "ready" }
@@ -142,6 +153,7 @@ export type KioskToDaemon =
   | { type: "activity"; activity: ActivitySummary }
   | { type: "announce"; announcement: Announcement }
   | { type: "contacts"; contacts: Contact[] }
+  | { type: "ring-devices"; devices: RingDevices }
   | { type: "history"; id: number; messages: HistoryMessage[] }
   | { type: "photos-result"; id: number; result: PhotosResult };
 

@@ -322,6 +322,11 @@ function start(
         } else if (msg.type === "contacts") {
           bridge.setContacts(msg.contacts);
           log(`contacts: ${msg.contacts.map((contact) => contact.displayName).join(", ") || "none"}`);
+        } else if (msg.type === "ring-devices") {
+          bridge.setRingDevices(msg.devices);
+          const entries = Object.entries(msg.devices);
+          const counted = entries.map(([userId, tokens]) => `${userId} (${tokens.length})`).join(", ");
+          log(`ring devices: ${counted || "none"}`);
         } else if (msg.type === "history" || msg.type === "photos-result") {
           bridge.resolveRequest(msg);
         } else if (msg.type === "announce") {
@@ -420,7 +425,8 @@ export class KioskServer extends Context.Service<
       yield* Effect.log(`serving kiosk on http://localhost:${server.port}`);
       yield* Effect.log(
         config.ring
-          ? `ring gateway on for ${Object.keys(config.ring.deviceTokens).length} contacts`
+          ? "ring gateway on, device tokens published by the family app" +
+              ` (env override for ${Object.keys(config.ring.deviceTokens).length} contacts)`
           : "ring gateway off",
       );
 

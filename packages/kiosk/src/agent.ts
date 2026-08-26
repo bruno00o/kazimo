@@ -6,6 +6,7 @@ import type {
   DaemonToKiosk,
   HistoryMessage,
   PhotosResult,
+  RingDevices,
   WeatherSummary,
 } from "@kazimo/shared";
 import { connectDaemon } from "./link";
@@ -22,12 +23,14 @@ export interface AgentCallbacks {
   onSendMessage: (roomId: string, text: string) => void;
   onShowPhotos: (id: number, userId: string | null) => void;
   onHistoryRequest: (id: number, roomId: string, limit: number) => void;
+  onRingStale: (userId: string, tokens: string[]) => void;
 }
 
 export interface AgentHandle {
   stop: () => void;
   sendActivity: (activity: ActivitySummary) => void;
   sendContacts: (contacts: Contact[]) => void;
+  sendRingDevices: (devices: RingDevices) => void;
   sendAnnounce: (announcement: Announcement) => void;
   sendHistory: (id: number, messages: HistoryMessage[]) => void;
   sendPhotosResult: (id: number, result: PhotosResult) => void;
@@ -43,6 +46,7 @@ export function startAgent(callbacks: AgentCallbacks): AgentHandle {
   let suppressed = false;
   let lastActivity: ActivitySummary | null = null;
   let lastContacts: Contact[] | null = null;
+  let lastRingDevices: RingDevices | null = null;
 
   const updateSuppression = () => {
     const next = voicePlaying || callActive;
@@ -90,6 +94,7 @@ export function startAgent(callbacks: AgentCallbacks): AgentHandle {
       startMic();
       if (lastActivity) link.send({ type: "activity", activity: lastActivity });
       if (lastContacts) link.send({ type: "contacts", contacts: lastContacts });
+      if (lastRingDevices) link.send({ type: "ring-devices", devices: lastRingDevices });
     } else if (message.type === "assistant") callbacks.onAssistant(message.tree);
     else if (message.type === "weather") callbacks.onWeather(message.weather);
     else if (message.type === "noisy") callbacks.onNoisy();
@@ -102,6 +107,7 @@ export function startAgent(callbacks: AgentCallbacks): AgentHandle {
     else if (message.type === "show-photos") callbacks.onShowPhotos(message.id, message.userId);
     else if (message.type === "history-request")
       callbacks.onHistoryRequest(message.id, message.roomId, message.limit);
+    else if (message.type === "ring-stale") callbacks.onRingStale(message.userId, message.tokens);
   }, play);
 
   const onKeyDown = (event: KeyboardEvent) => {
@@ -132,6 +138,10 @@ export function startAgent(callbacks: AgentCallbacks): AgentHandle {
     sendContacts(contacts) {
       lastContacts = contacts;
       link.send({ type: "contacts", contacts });
+    },
+    sendRingDevices(devices) {
+      lastRingDevices = devices;
+      link.send({ type: "ring-devices", devices });
     },
     sendAnnounce(announcement) {
       link.send({ type: "announce", announcement });

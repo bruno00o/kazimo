@@ -1,6 +1,16 @@
 /// <reference types="bun" />
 import { describe, expect, test } from "bun:test";
-import { isRingDeviceToken, parseRingRequest, RING_MAX_DEVICE_TOKENS, ringTokenIsStale } from "./ring";
+import {
+  isRingDeviceToken,
+  parseRingRequest,
+  RING_MAX_DEVICE_TOKENS,
+  ringDeviceIsCurrent,
+  ringDevicesOf,
+  ringTokenIsStale,
+  ringTokensOf,
+  withoutRingTokens,
+  withRingDevice,
+} from "./ring";
 
 const deviceToken = "d".repeat(64);
 
@@ -73,5 +83,110 @@ describe("device tokens and stale reasons", () => {
     expect(ringTokenIsStale("Unregistered")).toBe(true);
     expect(ringTokenIsStale("TooManyRequests")).toBe(false);
     expect(ringTokenIsStale(null)).toBe(false);
+  });
+});
+
+const phone = { deviceId: "PHONE", token: "a".repeat(64), updatedAt: 2000 };
+const tablet = { deviceId: "TABLET", token: "b".repeat(64), updatedAt: 1000 };
+
+describe("ringDevicesOf", () => {
+  test("keeps well formed entries newest first", () => {
+    expect(ringDevicesOf({ deviceTokens: [tablet, phone] })).toEqual([phone, tablet]);
+  });
+
+  test("drops invalid entries silently", () => {
+    expect(
+      ringDevicesOf({
+        deviceTokens: [
+          phone,
+          { deviceId: "BAD", token: "nope", updatedAt: 1 },
+          { deviceId: "", token: deviceToken, updatedAt: 1 },
+          { deviceId: "NOTIME", token: deviceToken },
+          { deviceId: "NEGATIVE", token: deviceToken, updatedAt: -1 },
+          "junk",
+          null,
+        ],
+      }),
+    ).toEqual([phone]);
+  });
+
+  test("one entry per device id, the freshest wins", () => {
+    const stale = { deviceId: "PHONE", token: "c".repeat(64), updatedAt: 1 };
+    expect(ringDevicesOf({ deviceTokens: [stale, phone] })).toEqual([phone]);
+    expect(ringDevicesOf({ deviceTokens: [phone, stale] })).toEqual([phone]);
+  });
+
+  test("caps the list the gateway would refuse", () => {
+    const many = Array.from({ length: RING_MAX_DEVICE_TOKENS + 3 }, (_, index) => ({
+      deviceId: `DEVICE${index}`,
+      token: deviceToken,
+      updatedAt: index,
+    }));
+    expect(ringDevicesOf({ deviceTokens: many })).toHaveLength(RING_MAX_DEVICE_TOKENS);
+  });
+
+  test("an empty or absent list means no devices", () => {
+    expect(ringDevicesOf({})).toEqual([]);
+    expect(ringDevicesOf({ deviceTokens: [] })).toEqual([]);
+    expect(ringDevicesOf({ deviceTokens: "none" })).toEqual([]);
+    expect(ringDevicesOf(null)).toEqual([]);
+    expect(ringDevicesOf(undefined)).toEqual([]);
+  });
+});
+
+describe("ringTokensOf", () => {
+  test("tokens newest first, never the same one twice", () => {
+    expect(ringTokensOf({ deviceTokens: [tablet, phone] })).toEqual([phone.token, tablet.token]);
+    expect(ringTokensOf({ deviceTokens: [phone, { ...tablet, token: phone.token }] })).toEqual([phone.token]);
+  });
+});
+
+describe("ringDeviceIsCurrent", () => {
+  test("true only when this device already publishes this token", () => {
+    const content = { deviceTokens: [phone, tablet] };
+    expect(ringDeviceIsCurrent(content, phone.deviceId, phone.token)).toBe(true);
+    expect(ringDeviceIsCurrent(content, phone.deviceId, tablet.token)).toBe(false);
+    expect(ringDeviceIsCurrent(content, "OTHER", phone.token)).toBe(false);
+    expect(ringDeviceIsCurrent({}, phone.deviceId, phone.token)).toBe(false);
+  });
+});
+
+describe("withRingDevice", () => {
+  test("replaces only this device and leaves the others alone", () => {
+    const renewed = { ...phone, token: "e".repeat(64), updatedAt: 3000 };
+    expect(withRingDevice({ deviceTokens: [phone, tablet] }, renewed)).toEqual({
+      deviceTokens: [renewed, tablet],
+    });
+  });
+
+  test("adds a device to an empty or missing list", () => {
+    expect(withRingDevice({}, phone)).toEqual({ deviceTokens: [phone] });
+    expect(withRingDevice(null, phone)).toEqual({ deviceTokens: [phone] });
+  });
+
+  test("stays within the cap by dropping the oldest device", () => {
+    const many = Array.from({ length: RING_MAX_DEVICE_TOKENS }, (_, index) => ({
+      deviceId: `DEVICE${index}`,
+      token: deviceToken,
+      updatedAt: index + 10,
+    }));
+    const next = withRingDevice({ deviceTokens: many }, phone);
+    expect(next.deviceTokens).toHaveLength(RING_MAX_DEVICE_TOKENS);
+    expect(next.deviceTokens.some((device) => device.deviceId === "DEVICE0")).toBe(false);
+  });
+});
+
+describe("withoutRingTokens", () => {
+  test("removes the dead tokens and keeps the rest", () => {
+    expect(withoutRingTokens({ deviceTokens: [phone, tablet] }, [tablet.token])).toEqual({
+      deviceTokens: [phone],
+    });
+  });
+
+  test("removing nothing known leaves the list as it stands", () => {
+    expect(withoutRingTokens({ deviceTokens: [phone] }, ["f".repeat(64)])).toEqual({
+      deviceTokens: [phone],
+    });
+    expect(withoutRingTokens({}, [phone.token])).toEqual({ deviceTokens: [] });
   });
 });

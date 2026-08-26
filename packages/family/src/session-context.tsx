@@ -28,6 +28,7 @@ import { readEnv } from "./env";
 import { UnauthorizedError } from "./http";
 import { appStrings } from "./i18n";
 import { type MatrixHandle, startMatrix } from "./matrix";
+import { publishVoipToken } from "./pushkit";
 import { SecurityGate } from "./SecurityGate";
 import { acceptInvites, endSession, type Identity, setDeviceName, whoami } from "./session";
 
@@ -208,6 +209,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const handle = phase.kind === "ready" ? phase.connected.handle : null;
   const client = handle?.client ?? null;
+  const deviceId = phase.kind === "ready" ? phase.connected.identity.deviceId : "";
 
   const signOut = useCallback(async () => {
     if (handle) await endSession(handle).catch(() => undefined);
@@ -218,6 +220,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setSecurityDismissed(false);
     setPhase({ kind: "signedOut" });
   }, [handle]);
+
+  useEffect(() => {
+    if (!client || !deviceId) return;
+    void publishVoipToken(client, deviceId).catch((error) =>
+      console.error("voip token publish failed", error),
+    );
+  }, [client, deviceId]);
 
   useEffect(() => {
     if (!client) return;

@@ -10,7 +10,7 @@ import { Effect, Schema } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
 import { KioskBridge } from "./bridge";
 import { type AgentConfig, daemonConfig } from "./config";
-import { ringContact } from "./ring";
+import { prunedRingDevices, type RingDeviceBook, ringContact } from "./ring";
 
 const FETCH_TIMEOUT_MS = 5000;
 const HEADLINES_PER_FEED = 20;
@@ -472,6 +472,14 @@ export const AgentToolkitLayer = AgentToolkit.toLayer(
   Effect.gen(function* () {
     const config = yield* daemonConfig;
     const bridge = yield* KioskBridge;
+    const ringBook: RingDeviceBook = {
+      tokens: (userId) => bridge.ringDevices()[userId] ?? [],
+      forget: (userId, tokens) =>
+        bridge.setRingDevices(prunedRingDevices(bridge.ringDevices(), userId, tokens)),
+      reportStale: (userId, tokens) => {
+        bridge.send({ type: "ring-stale", userId, tokens });
+      },
+    };
     return AgentToolkit.of({
       CurrentTime: () =>
         Effect.sync(() => ({
@@ -534,7 +542,7 @@ export const AgentToolkitLayer = AgentToolkit.toLayer(
           if (!bridge.send({ type: "place-call", roomId: match.contact.roomId })) {
             return { report: SCREEN_OFFLINE };
           }
-          ringContact(config.ring, match.contact, crypto.randomUUID());
+          void ringContact(config.ring, match.contact, crypto.randomUUID(), ringBook);
           return { report: `Calling ${match.contact.displayName} now.`, screen: true };
         }),
       SendMessage: ({ to, text }) =>
