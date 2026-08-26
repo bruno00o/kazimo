@@ -12,7 +12,7 @@ import type { AppleAudioCategoryOption, AppleAudioConfiguration } from "@livekit
 import { AudioSession, LiveKitRoom, VideoTrack } from "@livekit/react-native";
 import type { ClientLike } from "@unomed/react-native-matrix-sdk";
 import { ConnectionState, type Participant, Room, Track } from "livekit-client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -24,6 +24,9 @@ import {
 } from "react-native";
 import { joinRtc, leaveRtc, rtcFocusUrl, type SfuToken, sfuToken } from "./call";
 import { CALL_AUDIO_SESSION } from "./call-audio";
+import { createMediaEncryption, type MediaEncryption } from "./call-e2ee";
+import { startCallKeys } from "./call-key-channel";
+import type { CallKeyChannel } from "./call-keys";
 import { GRID_GAP, gridFor, visibleRemoteCount } from "./callLayout";
 import { Icon, type IconName } from "./Icon";
 import type { Strings } from "./i18n";
@@ -110,6 +113,8 @@ export function CallView({
   const published = useRef(false);
   const clientRef = useRef(client);
   clientRef.current = client;
+  const channelRef = useRef<CallKeyChannel | null>(null);
+  const [encryption] = useState<MediaEncryption>(createMediaEncryption);
 
   useEffect(() => {
     void startCallAudio(initialVideo).catch(() => {});
@@ -118,6 +123,8 @@ export function CallView({
     };
   }, [initialVideo]);
 
+  useEffect(() => () => encryption.dispose(), [encryption]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -125,6 +132,15 @@ export function CallView({
         const serviceUrl = await rtcFocusUrl(homeserver);
         const token = await sfuToken(serviceUrl, clientRef.current, roomId);
         if (cancelled) return;
+        const channel = await startCallKeys(clientRef.current, roomId).catch((error) => {
+          console.log("[e2ee] key channel start failed", String(error));
+          return null;
+        });
+        if (cancelled) {
+          channel?.stop();
+          return;
+        }
+        channelRef.current = channel;
         published.current = true;
         await joinRtc(clientRef.current, roomId, serviceUrl);
         if (cancelled) return;
@@ -137,6 +153,8 @@ export function CallView({
     })();
     return () => {
       cancelled = true;
+      channelRef.current?.stop();
+      channelRef.current = null;
       if (published.current) {
         published.current = false;
         void leaveRtc(clientRef.current, roomId).catch(() => {});
@@ -169,8 +187,22 @@ export function CallView({
   }
 
   return (
-    <LiveKitRoom serverUrl={load.token.url} token={load.token.jwt} connect audio video={initialVideo}>
-      <Stage title={title} strings={strings} initialVideo={initialVideo} onLeave={onLeave} />
+    <LiveKitRoom
+      serverUrl={load.token.url}
+      token={load.token.jwt}
+      connect
+      audio
+      video={initialVideo}
+      options={encryption.roomOptions}
+    >
+      <Stage
+        title={title}
+        strings={strings}
+        initialVideo={initialVideo}
+        encryption={encryption}
+        channelRef={channelRef}
+        onLeave={onLeave}
+      />
     </LiveKitRoom>
   );
 }
@@ -179,15 +211,23 @@ function Stage({
   title,
   strings,
   initialVideo,
+  encryption,
+  channelRef,
   onLeave,
 }: {
   title: string;
   strings: Strings;
   initialVideo: boolean;
+  encryption: MediaEncryption;
+  channelRef: RefObject<CallKeyChannel | null>;
   onLeave: () => void;
 }) {
   const state = useConnectionState();
   const room = useRoomContext();
+
+  useEffect(() => {
+    channelRef.current?.attach(encryption.sessionFor(room));
+  }, [room, encryption, channelRef]);
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant();
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const participants = useParticipants();
