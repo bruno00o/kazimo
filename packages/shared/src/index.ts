@@ -23,6 +23,7 @@ export {
 } from "./pairing";
 export {
   isRingDeviceToken,
+  parseRingPushPayload,
   parseRingRequest,
   RING_EVENT_TYPE,
   RING_MAX_CALL_ID_LENGTH,
@@ -42,6 +43,7 @@ export {
   type RingResult,
   ringDeviceIsCurrent,
   ringDevicesOf,
+  ringPushIsLive,
   ringTokenIsStale,
   ringTokensOf,
   withoutRingTokens,

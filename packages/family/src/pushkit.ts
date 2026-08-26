@@ -9,11 +9,14 @@ import {
 import type { ClientLike } from "@unomed/react-native-matrix-sdk";
 import { NativeModules, Platform } from "react-native";
 import { frameDirectRoom, putRoomState, roomStateContent } from "./frame";
+import type { PendingRingCalls } from "./pending-calls";
 
 type VoipPush = typeof import("react-native-voip-push-notification").default;
+type VoipCachedEvent = { name?: unknown; data?: unknown };
 
 const NATIVE_MODULE_NAME = "RNVoipPushNotificationManager";
 const TOKEN_TIMEOUT_MS = 10_000;
+const NOTIFICATION_EVENT_NAME = "RNVoipPushRemoteNotificationReceivedEvent";
 
 let pendingModule: Promise<VoipPush | null> | null = null;
 
@@ -48,6 +51,25 @@ export const voipToken = async (): Promise<string | null> => {
     });
     module.registerVoipToken();
   });
+};
+
+export const startVoipRings = async (pending: PendingRingCalls): Promise<() => void> => {
+  const module = await voipPush();
+  if (!module) return () => {};
+  module.addEventListener("notification", (payload) => {
+    pending.remember(payload);
+  });
+  module.addEventListener("didLoadWithEvents", (events) => {
+    if (!Array.isArray(events)) return;
+    for (const event of events as VoipCachedEvent[]) {
+      if (event?.name === NOTIFICATION_EVENT_NAME) pending.remember(event.data);
+    }
+  });
+  module.registerVoipToken();
+  return () => {
+    module.removeEventListener("notification");
+    module.removeEventListener("didLoadWithEvents");
+  };
 };
 
 export const ringUpdate = (

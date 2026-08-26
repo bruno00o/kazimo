@@ -5,7 +5,8 @@ mock.module("react-native", () => ({
   Platform: { OS: "android" },
 }));
 
-const { ringUpdate, voipToken } = await import("./pushkit");
+const { ringUpdate, startVoipRings, voipToken } = await import("./pushkit");
+const { createPendingRingCalls } = await import("./pending-calls");
 
 const PHONE = "PHONE";
 const token = "a".repeat(64);
@@ -50,5 +51,14 @@ describe("ringUpdate", () => {
 describe("voipToken", () => {
   test("no token and no crash where pushkit does not exist", async () => {
     expect(await voipToken()).toBeNull();
+  });
+});
+
+describe("startVoipRings", () => {
+  test("no subscription and no crash where pushkit does not exist", async () => {
+    const pending = createPendingRingCalls();
+    const stop = await startVoipRings(pending);
+    stop();
+    expect(pending.forRoom("!room:kazimo.dev")).toBeNull();
   });
 });

@@ -28,7 +28,8 @@ import { readEnv } from "./env";
 import { UnauthorizedError } from "./http";
 import { appStrings } from "./i18n";
 import { type MatrixHandle, startMatrix } from "./matrix";
-import { publishVoipToken } from "./pushkit";
+import { pendingRingCalls } from "./pending-calls";
+import { publishVoipToken, startVoipRings } from "./pushkit";
 import { SecurityGate } from "./SecurityGate";
 import { acceptInvites, endSession, type Identity, setDeviceName, whoami } from "./session";
 
@@ -154,6 +155,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    let stop: (() => void) | null = null;
+    let cancelled = false;
+    void startVoipRings(pendingRingCalls)
+      .then((off) => {
+        if (cancelled) off();
+        else stop = off;
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     loadSession()
       .catch(() => null)
@@ -240,6 +256,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         onRemoteEnd: (roomId) => dismissers.current.get(roomId)?.(),
       },
       t,
+      pendingRingCalls,
     ).then((instance) => {
       if (cancelled) {
         instance.stop();

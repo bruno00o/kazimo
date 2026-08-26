@@ -77,6 +77,25 @@ export const parseRingRequest = (value: unknown): RingRequest | null => {
   return { callee: { deviceTokens }, caller: { name: callerName }, roomId, callId };
 };
 
+const MILLISECONDS_PER_SECOND = 1000;
+
+const isEpochSeconds = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value > 0;
+
+export const parseRingPushPayload = (value: unknown): RingPushPayload | null => {
+  if (!isRecord(value)) return null;
+  const { v, roomId, callId, callerName, expiresAt } = value;
+  if (v !== RING_PAYLOAD_VERSION) return null;
+  if (!isRoomId(roomId) || !isCallId(callId)) return null;
+  if (typeof callerName !== "string" || !isEpochSeconds(expiresAt)) return null;
+  const name = callerName.trim();
+  if (name.length === 0 || name.length > RING_MAX_CALLER_NAME_LENGTH) return null;
+  return { v: RING_PAYLOAD_VERSION, roomId, callId, callerName: name, expiresAt };
+};
+
+export const ringPushIsLive = (payload: Pick<RingPushPayload, "expiresAt">, now: number): boolean =>
+  payload.expiresAt * MILLISECONDS_PER_SECOND > now;
+
 export interface RingDevice {
   deviceId: string;
   token: string;

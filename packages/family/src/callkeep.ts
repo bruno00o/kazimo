@@ -4,6 +4,13 @@ import type { Strings } from "./i18n";
 
 export type CallKeepEvent = "answerCall" | "endCall";
 
+export type BufferedCallEvent = { event: CallKeepEvent; uuid: string };
+
+const NATIVE_EVENT_NAMES: Record<CallKeepEvent, string> = {
+  answerCall: "RNCallKeepPerformAnswerCallAction",
+  endCall: "RNCallKeepPerformEndCallAction",
+};
+
 const CALL_AUDIO_CATEGORY_OPTIONS =
   AudioSessionCategoryOption.allowBluetooth |
   AudioSessionCategoryOption.allowBluetoothA2DP |
@@ -59,6 +66,20 @@ export const onCallEvent = (event: CallKeepEvent, handler: (uuid: string) => voi
   const listener = ({ callUUID }: { callUUID: string }) => handler(callUUID.toUpperCase());
   RNCallKeep.addEventListener(event, listener);
   return () => RNCallKeep.removeEventListener(event);
+};
+
+export const takeBufferedCallEvents = async (): Promise<BufferedCallEvent[]> => {
+  const buffered = await RNCallKeep.getInitialEvents().catch(() => []);
+  RNCallKeep.clearInitialEvents();
+  const replay: BufferedCallEvent[] = [];
+  for (const entry of buffered) {
+    const uuid = (entry.data as { callUUID?: string } | undefined)?.callUUID;
+    if (typeof uuid !== "string") continue;
+    for (const event of ["answerCall", "endCall"] as const) {
+      if (entry.name === NATIVE_EVENT_NAMES[event]) replay.push({ event, uuid: uuid.toUpperCase() });
+    }
+  }
+  return replay;
 };
 
 export const callUuid = (): string => {

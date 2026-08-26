@@ -2,10 +2,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   isRingDeviceToken,
+  parseRingPushPayload,
   parseRingRequest,
   RING_MAX_DEVICE_TOKENS,
+  RING_PAYLOAD_VERSION,
   ringDeviceIsCurrent,
   ringDevicesOf,
+  ringPushIsLive,
   ringTokenIsStale,
   ringTokensOf,
   withoutRingTokens,
@@ -67,6 +70,65 @@ describe("parseRingRequest", () => {
         callee: { deviceTokens: Array.from({ length: RING_MAX_DEVICE_TOKENS + 1 }, () => deviceToken) },
       }),
     ).toBeNull();
+  });
+});
+
+const pushed = {
+  v: RING_PAYLOAD_VERSION,
+  roomId: "!room:kazimo.dev",
+  callId: "11111111-2222-3333-4444-555555555555",
+  callerName: "Vovo",
+  expiresAt: 1_700_000_060,
+};
+
+describe("parseRingPushPayload", () => {
+  test("accepts the payload the gateway sends", () => {
+    expect(parseRingPushPayload(pushed)).toEqual(pushed);
+  });
+
+  test("trims the caller name", () => {
+    expect(parseRingPushPayload({ ...pushed, callerName: "  Vovo  " })?.callerName).toBe("Vovo");
+  });
+
+  test("refuses anything that is not an object", () => {
+    for (const value of [null, "ring", 7, [], undefined]) expect(parseRingPushPayload(value)).toBeNull();
+  });
+
+  test("refuses a version this app does not speak", () => {
+    expect(parseRingPushPayload({ ...pushed, v: 2 })).toBeNull();
+    expect(parseRingPushPayload({ ...pushed, v: "1" })).toBeNull();
+    expect(parseRingPushPayload({ ...pushed, v: undefined })).toBeNull();
+  });
+
+  test("refuses a missing or malformed room id", () => {
+    expect(parseRingPushPayload({ ...pushed, roomId: "room:kazimo.dev" })).toBeNull();
+    expect(parseRingPushPayload({ ...pushed, roomId: 7 })).toBeNull();
+  });
+
+  test("refuses a call id that is not opaque and short", () => {
+    expect(parseRingPushPayload({ ...pushed, callId: "short" })).toBeNull();
+    expect(parseRingPushPayload({ ...pushed, callId: "has spaces here" })).toBeNull();
+  });
+
+  test("refuses an empty or oversized caller name", () => {
+    expect(parseRingPushPayload({ ...pushed, callerName: "   " })).toBeNull();
+    expect(parseRingPushPayload({ ...pushed, callerName: "n".repeat(65) })).toBeNull();
+    expect(parseRingPushPayload({ ...pushed, callerName: 7 })).toBeNull();
+  });
+
+  test("refuses a deadline that is not a positive number of seconds", () => {
+    expect(parseRingPushPayload({ ...pushed, expiresAt: 0 })).toBeNull();
+    expect(parseRingPushPayload({ ...pushed, expiresAt: -1 })).toBeNull();
+    expect(parseRingPushPayload({ ...pushed, expiresAt: "soon" })).toBeNull();
+    expect(parseRingPushPayload({ ...pushed, expiresAt: Number.NaN })).toBeNull();
+  });
+});
+
+describe("ringPushIsLive", () => {
+  test("compares seconds against milliseconds", () => {
+    expect(ringPushIsLive(pushed, 1_700_000_059_000)).toBe(true);
+    expect(ringPushIsLive(pushed, 1_700_000_060_000)).toBe(false);
+    expect(ringPushIsLive(pushed, 1_700_000_061_000)).toBe(false);
   });
 });
 
