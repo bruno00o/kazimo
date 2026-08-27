@@ -241,6 +241,18 @@ function Stage({
   const connected = state === ConnectionState.Connected;
 
   const remotes = useMemo(() => participants.filter((participant) => !participant.isLocal), [participants]);
+  const sawRemote = useRef(false);
+  const endedAlone = useRef(false);
+  useEffect(() => {
+    if (state !== ConnectionState.Connected) return;
+    if (remotes.length > 0) {
+      sawRemote.current = true;
+      return;
+    }
+    if (!sawRemote.current || endedAlone.current) return;
+    endedAlone.current = true;
+    onLeave();
+  }, [state, remotes.length, onLeave]);
   const grouped = remotes.length > 1;
   const tiles = useMemo(() => {
     if (!grouped) return [];
