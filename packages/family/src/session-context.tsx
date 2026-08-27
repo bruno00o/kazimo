@@ -28,12 +28,20 @@ import { readEnv } from "./env";
 import { UnauthorizedError } from "./http";
 import { appStrings } from "./i18n";
 import { type MatrixHandle, startMatrix } from "./matrix";
+import {
+  notifyMissedCall,
+  requestNotificationPermission,
+  setupNotifications,
+  watchNotificationTaps,
+} from "./notifications";
 import { pendingRingCalls } from "./pending-calls";
 import { publishVoipToken, startVoipRings } from "./pushkit";
 import { SecurityGate } from "./SecurityGate";
 import { acceptInvites, endSession, type Identity, setDeviceName, whoami } from "./session";
 
 const t = appStrings();
+
+setupNotifications();
 
 const LOGOUT_ERROR_NAME = "TokenRefreshLogoutError";
 
@@ -129,6 +137,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   const [center, setCenter] = useState<CallCenter | null>(null);
   const [securityDismissed, setSecurityDismissed] = useState(false);
+  const [tappedRoomId, setTappedRoomId] = useState<string | null>(null);
   const dismissers = useRef(new Map<string, () => void>());
   const activeHandle = useRef<MatrixHandle | null>(null);
 
@@ -226,6 +235,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const handle = phase.kind === "ready" ? phase.connected.handle : null;
   const client = handle?.client ?? null;
   const deviceId = phase.kind === "ready" ? phase.connected.identity.deviceId : "";
+  const routable = phase.kind === "ready" && (phase.security.state === "ready" || securityDismissed);
 
   const signOut = useCallback(async () => {
     if (handle) await endSession(handle).catch(() => undefined);
@@ -245,6 +255,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [client, deviceId]);
 
   useEffect(() => {
+    if (!routable) return;
+    void requestNotificationPermission().catch(() => undefined);
+  }, [routable]);
+
+  useEffect(() => watchNotificationTaps(setTappedRoomId), []);
+
+  useEffect(() => {
+    if (!routable || !tappedRoomId) return;
+    setTappedRoomId(null);
+    router.push({ pathname: "/chat/[roomId]", params: { roomId: tappedRoomId } });
+  }, [routable, tappedRoomId, router]);
+
+  useEffect(() => {
     if (!client) return;
     let started: CallCenter | null = null;
     let cancelled = false;
@@ -254,6 +277,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         onAnswer: (incoming) =>
           router.push({ pathname: "/call/[roomId]", params: { roomId: incoming.roomId } }),
         onRemoteEnd: (roomId) => dismissers.current.get(roomId)?.(),
+        onMissed: (missed) => {
+          void notifyMissedCall(t, missed);
+        },
       },
       t,
       pendingRingCalls,

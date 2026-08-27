@@ -10,6 +10,7 @@ import {
   callUuid,
   dismiss,
   dismissAll,
+  dismissUnanswered,
   markActive,
   ringIncoming,
   setupCallKeep,
@@ -30,7 +31,11 @@ export type CallCenter = {
 
 export const startCallCenter = async (
   client: ClientLike,
-  handlers: { onAnswer: (call: IncomingCall) => void; onRemoteEnd: (roomId: string) => void },
+  handlers: {
+    onAnswer: (call: IncomingCall) => void;
+    onRemoteEnd: (roomId: string) => void;
+    onMissed: (call: IncomingCall) => void;
+  },
   strings: Strings,
   pending: PendingRingCalls | null = null,
   events: CallEvents = sharedCallEvents,
@@ -97,10 +102,16 @@ export const startCallCenter = async (
       return;
     }
     if (!remote && uuid && seenRemote.has(info.id)) {
-      dismiss(uuid);
-      const wasAnswered = answeredRoomId === info.id;
+      if (answeredRoomId === info.id) {
+        dismiss(uuid);
+        clear(info.id);
+        handlers.onRemoteEnd(info.id);
+        return;
+      }
+      const missed = byUuid.get(uuid) ?? { roomId: info.id, title: callerOf(info).name };
+      dismissUnanswered(uuid);
       clear(info.id);
-      if (wasAnswered) handlers.onRemoteEnd(info.id);
+      handlers.onMissed(missed);
     }
   };
 
@@ -117,7 +128,8 @@ export const startCallCenter = async (
     for (const room of client.rooms()) watch(room);
     for (const stale of pending?.expire() ?? []) {
       if (byRoom.get(stale.roomId) === stale.uuid) continue;
-      dismiss(stale.uuid);
+      dismissUnanswered(stale.uuid);
+      handlers.onMissed({ roomId: stale.roomId, title: stale.callerName });
     }
   };
 

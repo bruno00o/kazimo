@@ -109,6 +109,7 @@ export interface Strings {
   ok: string;
   callChannel: string;
   inCall: string;
+  missedCall: string;
 }
 
 const en: Strings = {
@@ -220,6 +221,7 @@ const en: Strings = {
   ok: "Ok",
   callChannel: "Kazimo calls",
   inCall: "Kazimo in a call",
+  missedCall: "Missed call",
 };
 
 const fr: Strings = {
@@ -333,6 +335,7 @@ const fr: Strings = {
   ok: "Ok",
   callChannel: "Appels Kazimo",
   inCall: "Kazimo en appel",
+  missedCall: "Appel manqué",
 };
 
 const ptPT: Strings = {
@@ -445,6 +448,7 @@ const ptPT: Strings = {
   ok: "Ok",
   callChannel: "Chamadas Kazimo",
   inCall: "Kazimo em chamada",
+  missedCall: "Chamada perdida",
 };
 
 const es: Strings = {
@@ -558,6 +562,7 @@ const es: Strings = {
   ok: "Ok",
   callChannel: "Llamadas Kazimo",
   inCall: "Kazimo en llamada",
+  missedCall: "Llamada perdida",
 };
 
 const byLang: Record<string, Strings> = { en, fr, es, pt: ptPT, "pt-PT": ptPT };

@@ -1,5 +1,5 @@
 import { Platform } from "react-native";
-import RNCallKeep, { AudioSessionCategoryOption, AudioSessionMode } from "react-native-callkeep";
+import RNCallKeep, { AudioSessionCategoryOption, AudioSessionMode, CONSTANTS } from "react-native-callkeep";
 import type { Strings } from "./i18n";
 
 export type CallKeepEvent = "answerCall" | "endCall";
@@ -83,6 +83,10 @@ export const markActive = (uuid: string): void => {
 
 export const dismiss = (uuid: string): void => {
   RNCallKeep.endCall(uuid);
+};
+
+export const dismissUnanswered = (uuid: string): void => {
+  RNCallKeep.reportEndCallWithUUID(uuid, CONSTANTS.END_CALL_REASONS.UNANSWERED);
 };
 
 export const dismissAll = (): void => {

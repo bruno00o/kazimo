@@ -20,6 +20,7 @@ type CallKeepListener = (event: { callUUID: string }) => void;
 const calls = {
   displayed: [] as { uuid: string; handle: string; name: string }[],
   ended: [] as string[],
+  unanswered: [] as { uuid: string; reason: number }[],
   active: [] as string[],
   endedAll: 0,
   listeners: new Map<string, CallKeepListener>(),
@@ -34,6 +35,16 @@ mock.module("react-native-callkeep", () => ({
     defaultToSpeaker: 8,
   },
   AudioSessionMode: { videoChat: "videoChat" },
+  CONSTANTS: {
+    END_CALL_REASONS: {
+      FAILED: 1,
+      REMOTE_ENDED: 2,
+      UNANSWERED: 3,
+      ANSWERED_ELSEWHERE: 4,
+      DECLINED_ELSEWHERE: 5,
+      MISSED: 6,
+    },
+  },
   default: {
     setup: async () => undefined,
     setAvailable: () => undefined,
@@ -46,6 +57,9 @@ mock.module("react-native-callkeep", () => ({
     backToForeground: () => undefined,
     endCall: (uuid: string) => {
       calls.ended.push(uuid);
+    },
+    reportEndCallWithUUID: (uuid: string, reason: number) => {
+      calls.unanswered.push({ uuid, reason });
     },
     endAllCalls: () => {
       calls.endedAll += 1;
@@ -70,6 +84,7 @@ const CALL_ID = "11111111-2222-3333-4444-555555555555";
 const PUSHED_UUID = CALL_ID.toUpperCase();
 const NOW = Date.now();
 const DEADLINE = Math.floor(NOW / 1000) + 60;
+const UNANSWERED = 3;
 
 const push = (overrides: Record<string, unknown> = {}) => ({
   v: RING_PAYLOAD_VERSION,
@@ -102,12 +117,17 @@ const harness = async (pending: ReturnType<typeof createPendingRingCalls> | null
   const client = { userId: () => ME, rooms: () => [room] };
   const answers: { roomId: string; title: string }[] = [];
   const remoteEnds: string[] = [];
+  const misses: { roomId: string; title: string }[] = [];
   const audioSessions: string[] = [];
   const events = createCallEvents();
   events.start((event) => audioSessions.push(event));
   const center = await startCallCenter(
     client as never,
-    { onAnswer: (call) => answers.push(call), onRemoteEnd: (roomId) => remoteEnds.push(roomId) },
+    {
+      onAnswer: (call) => answers.push(call),
+      onRemoteEnd: (roomId) => remoteEnds.push(roomId),
+      onMissed: (call) => misses.push(call),
+    },
     {} as never,
     pending,
     events,
@@ -116,6 +136,7 @@ const harness = async (pending: ReturnType<typeof createPendingRingCalls> | null
     center,
     answers,
     remoteEnds,
+    misses,
     audioSessions,
     sync: (ringing: boolean) => notify?.(roomInfo(ringing)),
     answer: (uuid: string) => calls.listeners.get("answerCall")?.({ callUUID: uuid }),
@@ -126,6 +147,7 @@ const harness = async (pending: ReturnType<typeof createPendingRingCalls> | null
 beforeEach(() => {
   calls.displayed = [];
   calls.ended = [];
+  calls.unanswered = [];
   calls.active = [];
   calls.endedAll = 0;
   calls.buffered = [];
@@ -150,6 +172,32 @@ describe("startCallCenter without a push", () => {
     app.sync(false);
     expect(calls.ended).toContain(uuid);
     expect(app.remoteEnds).toEqual([ROOM]);
+    expect(app.misses).toEqual([]);
+    expect(calls.unanswered).toEqual([]);
+    app.center.stop();
+  });
+
+  test("a ring the caller gives up on ends as unanswered and is reported missed", async () => {
+    const app = await harness(null);
+    app.sync(true);
+    const uuid = calls.displayed[0]?.uuid ?? "";
+    app.sync(false);
+    expect(app.misses).toEqual([{ roomId: ROOM, title: "Vovo" }]);
+    expect(app.remoteEnds).toEqual([]);
+    expect(calls.unanswered).toEqual([{ uuid, reason: UNANSWERED }]);
+    expect(calls.ended).toEqual([]);
+    app.center.stop();
+  });
+
+  test("declining on the callkit screen counts as seen and reports nothing", async () => {
+    const app = await harness(null);
+    app.sync(true);
+    const uuid = calls.displayed[0]?.uuid ?? "";
+    app.end(uuid);
+    app.sync(false);
+    expect(app.misses).toEqual([]);
+    expect(app.remoteEnds).toEqual([]);
+    expect(calls.unanswered).toEqual([]);
     app.center.stop();
   });
 });
@@ -255,8 +303,18 @@ describe("startCallCenter adopting a pushed call", () => {
     const app = await harness(pending);
     app.sync(true);
     app.sync(false);
-    expect(calls.ended).toContain(PUSHED_UUID);
+    expect(calls.unanswered).toEqual([{ uuid: PUSHED_UUID, reason: UNANSWERED }]);
+    expect(app.misses).toEqual([{ roomId: ROOM, title: "Vovo" }]);
     expect(pending.forRoom(ROOM, NOW)).toBeNull();
+    app.center.stop();
+  });
+
+  test("a pushed ring nobody adopted is reported missed when it expires", async () => {
+    const pending = createPendingRingCalls();
+    pending.remember(push({ callerName: "Avo", expiresAt: Math.floor(NOW / 1000) - 60 }), NOW - 120_000);
+    const app = await harness(pending);
+    expect(app.misses).toEqual([{ roomId: ROOM, title: "Avo" }]);
+    expect(calls.unanswered).toEqual([{ uuid: PUSHED_UUID, reason: UNANSWERED }]);
     app.center.stop();
   });
 });
