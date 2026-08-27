@@ -13,6 +13,18 @@ export {
   frameStatusOf,
 } from "./control";
 export {
+  DIAL_BAUD_RATE,
+  DIAL_BUTTON_KINDS,
+  DIAL_BUTTONS,
+  DIAL_LABEL_MAX_LENGTH,
+  type DialButton,
+  type DialButtonKind,
+  type DialCommand,
+  type DialEvent,
+  encodeDialCommand,
+  parseDialEvent,
+} from "./dial";
+export {
   codesMatch,
   formatPairingCode,
   normalizePairingCode,

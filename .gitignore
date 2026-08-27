@@ -10,4 +10,5 @@ repos/
 .env*.local
 node_modules/
 dist/
+.pio/
 .DS_Store

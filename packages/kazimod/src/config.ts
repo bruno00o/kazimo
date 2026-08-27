@@ -41,6 +41,7 @@ export interface DaemonConfig extends KioskConfig {
   agent: AgentConfig;
   wake: WakeConfig;
   ring: RingConfig | null;
+  dialPort: string | null;
   chatTtlMs: number;
   followupWindowMs: number;
   port: number;
@@ -147,6 +148,7 @@ export const daemonConfig: Config.Config<DaemonConfig> = Config.all({
     captureRmsMin: Config.withDefault(Config.number("KAZIMO_CAPTURE_RMS_MIN"), 130),
   }),
   ring,
+  dialPort: optionalString("KAZIMO_DIAL_PORT"),
   chatTtlMs: Config.withDefault(Config.number("KAZIMO_CHAT_TTL"), 180).pipe(
     Config.map((seconds) => seconds * 1000),
   ),
