@@ -13,6 +13,8 @@ export interface GatewayEnv {
   deployments: Deployment[];
   ringsPerMinute: number;
   lifetimeSeconds: number;
+  notifiesPerMinute: number;
+  messageLifetimeSeconds: number;
 }
 
 export interface GatewayConfig extends Omit<GatewayEnv, "keyPath"> {
@@ -25,6 +27,8 @@ export const APNS_SANDBOX_HOST = "https://api.sandbox.push.apple.com";
 const DEFAULT_PORT = 8089;
 const DEFAULT_RINGS_PER_MINUTE = 6;
 const DEFAULT_LIFETIME_SECONDS = 60;
+const DEFAULT_NOTIFIES_PER_MINUTE = 60;
+const DEFAULT_MESSAGE_LIFETIME_SECONDS = 24 * 60 * 60;
 
 export class RingConfigError extends Error {}
 
@@ -99,6 +103,16 @@ export const parseGatewayEnv = (env: Env): GatewayEnv => {
       "KAZIMO_RING_RATE_PER_MINUTE",
     ),
     lifetimeSeconds: numberOr(env.KAZIMO_RING_LIFETIME, DEFAULT_LIFETIME_SECONDS, "KAZIMO_RING_LIFETIME"),
+    notifiesPerMinute: numberOr(
+      env.KAZIMO_RING_NOTIFY_RATE_PER_MINUTE,
+      DEFAULT_NOTIFIES_PER_MINUTE,
+      "KAZIMO_RING_NOTIFY_RATE_PER_MINUTE",
+    ),
+    messageLifetimeSeconds: numberOr(
+      env.KAZIMO_RING_MESSAGE_LIFETIME,
+      DEFAULT_MESSAGE_LIFETIME_SECONDS,
+      "KAZIMO_RING_MESSAGE_LIFETIME",
+    ),
   };
 };
 

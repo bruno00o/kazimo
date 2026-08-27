@@ -5,16 +5,16 @@ import {
   type RingErrorResponse,
   type RingResponse,
 } from "@kazimo/shared";
-import { apnsTopic, createPusher, type Pusher } from "./apns";
+import { apnsTopic, createPusher, type Pusher, transportFor } from "./apns";
 import { type Authenticator, createAuthenticator } from "./auth";
 import type { GatewayConfig } from "./config";
 import { createJwtProvider, importSigningKey } from "./jwt";
 import { createRateLimiter, type RateLimiter } from "./limit";
+import { log } from "./log";
+import { createMessagePusher } from "./message";
+import { handleNotify, NOTIFY_PATH, type NotifyHandlerDeps } from "./notify";
 
 const MAX_BODY_BYTES = 4096;
-
-export const log = (message: string): void =>
-  console.log(`[kazimo-ring] ${new Date().toISOString()} ${message}`);
 
 export interface RingHandlerDeps {
   auth: Authenticator;
@@ -76,15 +76,29 @@ export const handleRing = async (request: Request, deps: RingHandlerDeps): Promi
 
 export const createRingServer = async (config: GatewayConfig) => {
   const key = await importSigningKey(config.privateKeyPem);
-  const deps: RingHandlerDeps = {
+  const jwt = createJwtProvider(key, config.keyId, config.teamId);
+  const transport = transportFor(config.apnsHost);
+  const ringDeps: RingHandlerDeps = {
     auth: await createAuthenticator(config.deployments),
     limiter: createRateLimiter(config.ringsPerMinute),
     pusher: createPusher({
       host: config.apnsHost,
       topic: apnsTopic(config.bundleId),
-      jwt: createJwtProvider(key, config.keyId, config.teamId),
+      jwt,
+      transport,
     }),
     lifetimeSeconds: config.lifetimeSeconds,
+  };
+  const notifyDeps: NotifyHandlerDeps = {
+    appId: config.bundleId,
+    pusher: createMessagePusher({
+      host: config.apnsHost,
+      topic: config.bundleId,
+      jwt,
+      transport,
+    }),
+    limiter: createRateLimiter(config.notifiesPerMinute),
+    lifetimeSeconds: config.messageLifetimeSeconds,
   };
 
   return Bun.serve({
@@ -92,7 +106,10 @@ export const createRingServer = async (config: GatewayConfig) => {
     routes: {
       "/health": new Response("ok"),
       [RING_PATH]: {
-        POST: (request: Request) => handleRing(request, deps),
+        POST: (request: Request) => handleRing(request, ringDeps),
+      },
+      [NOTIFY_PATH]: {
+        POST: (request: Request) => handleNotify(request, notifyDeps),
       },
     },
     fetch: () => new Response("not found", { status: 404 }),

@@ -31,4 +31,12 @@ describe("createRateLimiter", () => {
     }
     expect(limiter.allow("lisboa", 1000 + RATE_WINDOW_MS + 1)).toBe(true);
   });
+
+  test("forgets keys that fell out of the window instead of growing forever", () => {
+    const limiter = createRateLimiter(1, RATE_WINDOW_MS, 2);
+    expect(limiter.allow("one", 1000)).toBe(true);
+    expect(limiter.allow("two", 1000)).toBe(true);
+    expect(limiter.allow("three", 1000)).toBe(false);
+    expect(limiter.allow("three", 1000 + RATE_WINDOW_MS + 1)).toBe(true);
+  });
 });

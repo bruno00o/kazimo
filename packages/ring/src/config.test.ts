@@ -25,7 +25,22 @@ describe("parseGatewayEnv", () => {
     expect(env.port).toBe(8089);
     expect(env.ringsPerMinute).toBe(6);
     expect(env.lifetimeSeconds).toBe(60);
+    expect(env.notifiesPerMinute).toBe(60);
+    expect(env.messageLifetimeSeconds).toBe(86_400);
     expect(env.deployments.map((deployment) => deployment.deploymentId)).toEqual(["lisboa", "porto"]);
+  });
+
+  test("lets the message leg set its own rate and lifetime", () => {
+    const env = parseGatewayEnv({
+      ...complete,
+      KAZIMO_RING_NOTIFY_RATE_PER_MINUTE: "120",
+      KAZIMO_RING_MESSAGE_LIFETIME: "3600",
+    });
+    expect(env.notifiesPerMinute).toBe(120);
+    expect(env.messageLifetimeSeconds).toBe(3600);
+    expect(() => parseGatewayEnv({ ...complete, KAZIMO_RING_MESSAGE_LIFETIME: "-1" })).toThrow(
+      RingConfigError,
+    );
   });
 
   test("names every missing variable instead of starting half configured", () => {
