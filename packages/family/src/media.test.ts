@@ -49,6 +49,7 @@ mock.module("expo-image-picker", () => ({
 }));
 mock.module("react-native-blurhash", () => ({ Blurhash: { encode: async () => "" } }));
 mock.module("@unomed/react-native-matrix-sdk", () => ({
+  Membership: { Joined: "joined" },
   MediaSource: {
     fromUrl: (url: string) => ({ from: "url", url }),
     fromJson: (json: string) => ({ from: "json", json }),

@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from "bun:test";
 import type { TimelineEntry } from "./timeline";
 
 mock.module("@unomed/react-native-matrix-sdk", () => ({
+  Membership: { Joined: "joined" },
   MediaSource: { fromUrl: (url: string) => ({ url }), fromJson: (json: string) => ({ json }) },
   messageEventContentFromMarkdown: (body: string) => ({ body }),
   ReceiptType: { Read: 0, ReadPrivate: 1, FullyRead: 2 },
