@@ -1,0 +1,11 @@
+node_modules
+**/node_modules
+.git
+repos
+spikes
+hardware
+firmware
+packages/family/ios
+packages/family/android
+.claude
+**/*.test.ts
