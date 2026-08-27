@@ -105,6 +105,7 @@ function start(
 ) {
   const isDev = process.env.NODE_ENV !== "production";
   let latestWeather: WeatherSummary | null = null;
+  let sinkOwner = 0;
   let lastNoisy = 0;
   const {
     port: _port,
@@ -276,6 +277,7 @@ function start(
     websocket: {
       open(ws) {
         log(`kiosk connected (${ws.data.id})`);
+        sinkOwner = ws.data.id;
         bridge.setSink((message) => ws.send(JSON.stringify(message)));
         if (wakeModels) {
           ws.data.listener = createListener(
@@ -371,7 +373,7 @@ function start(
       },
       close(ws) {
         log(`kiosk disconnected (${ws.data.id})`);
-        bridge.setSink(null);
+        if (sinkOwner === ws.data.id) bridge.setSink(null);
       },
     },
   });
