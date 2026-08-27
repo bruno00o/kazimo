@@ -22,7 +22,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { joinRtc, leaveRtc, rtcFocusUrl, type SfuToken, sfuToken } from "./call";
+import { joinRtc, leaveRtc, leaveWhenJoinSettles, rtcFocusUrl, type SfuToken, sfuToken } from "./call";
 import { CALL_AUDIO_SESSION } from "./call-audio";
 import { createMediaEncryption, type MediaEncryption } from "./call-e2ee";
 import { startCallKeys } from "./call-key-channel";
@@ -110,7 +110,7 @@ export function CallView({
   onLeave: () => void;
 }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
-  const published = useRef(false);
+  const joined = useRef<Promise<void> | null>(null);
   const clientRef = useRef(client);
   clientRef.current = client;
   const channelRef = useRef<CallKeyChannel | null>(null);
@@ -141,8 +141,9 @@ export function CallView({
           return;
         }
         channelRef.current = channel;
-        published.current = true;
-        await joinRtc(clientRef.current, roomId, serviceUrl);
+        const join = joinRtc(clientRef.current, roomId, serviceUrl);
+        joined.current = join;
+        await join;
         if (cancelled) return;
         setLoad({ kind: "ready", token });
       } catch (error) {
@@ -155,10 +156,11 @@ export function CallView({
       cancelled = true;
       channelRef.current?.stop();
       channelRef.current = null;
-      if (published.current) {
-        published.current = false;
-        void leaveRtc(clientRef.current, roomId).catch(() => {});
-      }
+      const join = joined.current;
+      joined.current = null;
+      if (!join) return;
+      const client = clientRef.current;
+      void leaveWhenJoinSettles(join, () => leaveRtc(client, roomId));
     };
   }, [homeserver, roomId]);
 

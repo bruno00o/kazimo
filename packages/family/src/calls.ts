@@ -45,6 +45,7 @@ export const startCallCenter = async (
   const byUuid = new Map<string, IncomingCall>();
   const watchers = new Map<string, TaskHandleLike>();
   const seenRemote = new Set<string>();
+  const silenced = new Set<string>();
   let answeredRoomId: string | null = null;
 
   await setupCallKeep(strings);
@@ -58,10 +59,11 @@ export const startCallCenter = async (
     if (answeredRoomId === roomId) answeredRoomId = null;
   };
 
+  const othersInCall = (info: RoomInfo): boolean =>
+    info.hasRoomCall && info.activeRoomCallParticipants.some((participant) => participant !== me);
+
   const remoteInCall = (info: RoomInfo): boolean =>
-    info.hasRoomCall &&
-    !info.activeRoomCallParticipants.includes(me) &&
-    info.activeRoomCallParticipants.some((participant) => participant !== me);
+    othersInCall(info) && !info.activeRoomCallParticipants.includes(me);
 
   const callerOf = (info: RoomInfo): { handle: string; name: string } => {
     const other = info.heroes.find((hero) => hero.userId !== me);
@@ -86,10 +88,13 @@ export const startCallCenter = async (
 
   const sync = (info: RoomInfo) => {
     if (info.membership !== Membership.Joined) return;
+    const others = othersInCall(info);
+    if (info.hasRoomCall && info.activeRoomCallParticipants.includes(me)) silenced.add(info.id);
+    if (!others) silenced.delete(info.id);
     const remote = remoteInCall(info);
     const uuid = byRoom.get(info.id);
     if (remote) seenRemote.add(info.id);
-    if (remote && !uuid) {
+    if (remote && !uuid && !silenced.has(info.id)) {
       const pushed = pending?.forRoom(info.id) ?? null;
       if (pushed) {
         adopt(info, pushed);
@@ -101,7 +106,7 @@ export const startCallCenter = async (
       ringIncoming(fresh, handle, name, INCOMING_DEFAULT_HAS_VIDEO);
       return;
     }
-    if (!remote && uuid && seenRemote.has(info.id)) {
+    if (!others && uuid && seenRemote.has(info.id)) {
       if (answeredRoomId === info.id) {
         dismiss(uuid);
         clear(info.id);
@@ -129,6 +134,7 @@ export const startCallCenter = async (
     for (const stale of pending?.expire() ?? []) {
       if (byRoom.get(stale.roomId) === stale.uuid) continue;
       dismissUnanswered(stale.uuid);
+      if (silenced.has(stale.roomId)) continue;
       handlers.onMissed({ roomId: stale.roomId, title: stale.callerName });
     }
   };
@@ -163,6 +169,7 @@ export const startCallCenter = async (
       return;
     }
     const wasAnswered = answeredRoomId === call.roomId;
+    silenced.add(call.roomId);
     clear(call.roomId);
     if (wasAnswered) handlers.onRemoteEnd(call.roomId);
   };
@@ -177,6 +184,7 @@ export const startCallCenter = async (
     hangup(roomId) {
       const uuid = byRoom.get(roomId);
       if (uuid) dismiss(uuid);
+      silenced.add(roomId);
       clear(roomId);
     },
     stop() {
@@ -189,6 +197,7 @@ export const startCallCenter = async (
       byRoom.clear();
       byUuid.clear();
       seenRemote.clear();
+      silenced.clear();
       answeredRoomId = null;
     },
   };

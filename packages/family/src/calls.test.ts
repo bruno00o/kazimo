@@ -139,6 +139,11 @@ const harness = async (pending: ReturnType<typeof createPendingRingCalls> | null
     misses,
     audioSessions,
     sync: (ringing: boolean) => notify?.(roomInfo(ringing)),
+    syncWith: (participants: string[]) =>
+      notify?.({
+        ...roomInfo(participants.length > 0),
+        activeRoomCallParticipants: participants,
+      }),
     answer: (uuid: string) => calls.listeners.get("answerCall")?.({ callUUID: uuid }),
     end: (uuid: string) => calls.listeners.get("endCall")?.({ callUUID: uuid }),
   };
@@ -198,6 +203,70 @@ describe("startCallCenter without a push", () => {
     expect(app.misses).toEqual([]);
     expect(app.remoteEnds).toEqual([]);
     expect(calls.unanswered).toEqual([]);
+    app.center.stop();
+  });
+
+  test("the lingering remote after leaving a call never rings back", async () => {
+    const app = await harness(null);
+    app.syncWith([CALLER, ME]);
+    app.syncWith([CALLER]);
+    expect(calls.displayed).toEqual([]);
+    expect(app.misses).toEqual([]);
+    app.syncWith([]);
+    app.syncWith([CALLER]);
+    expect(calls.displayed).toHaveLength(1);
+    app.center.stop();
+  });
+
+  test("joining an answered call is not mistaken for the caller hanging up", async () => {
+    const app = await harness(null);
+    app.sync(true);
+    const uuid = calls.displayed[0]?.uuid ?? "";
+    app.answer(uuid);
+    app.syncWith([CALLER, ME]);
+    expect(app.remoteEnds).toEqual([]);
+    expect(app.misses).toEqual([]);
+    expect(calls.ended).toEqual([]);
+    app.syncWith([ME]);
+    expect(app.remoteEnds).toEqual([ROOM]);
+    expect(calls.ended).toEqual([uuid]);
+    app.center.stop();
+  });
+
+  test("our own stale membership while ringing never reports a missed call", async () => {
+    const app = await harness(null);
+    app.sync(true);
+    const uuid = calls.displayed[0]?.uuid ?? "";
+    app.syncWith([CALLER, ME]);
+    expect(app.misses).toEqual([]);
+    expect(calls.unanswered).toEqual([]);
+    app.syncWith([]);
+    expect(app.misses).toEqual([{ roomId: ROOM, title: "Vovo" }]);
+    expect(calls.unanswered).toEqual([{ uuid, reason: UNANSWERED }]);
+    app.center.stop();
+  });
+
+  test("a call that never ends between two rings stops silencing the room", async () => {
+    const app = await harness(null);
+    app.syncWith([CALLER, ME]);
+    app.syncWith([CALLER]);
+    expect(calls.displayed).toEqual([]);
+    app.syncWith([ME]);
+    app.syncWith([CALLER]);
+    expect(calls.displayed).toHaveLength(1);
+    app.center.stop();
+  });
+
+  test("a declined caller who stays in the call does not ring again", async () => {
+    const app = await harness(null);
+    app.sync(true);
+    const uuid = calls.displayed[0]?.uuid ?? "";
+    app.end(uuid);
+    app.sync(true);
+    expect(calls.displayed).toHaveLength(1);
+    app.sync(false);
+    app.sync(true);
+    expect(calls.displayed).toHaveLength(2);
     app.center.stop();
   });
 });

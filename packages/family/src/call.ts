@@ -105,6 +105,12 @@ export const joinRtc = async (client: ClientLike, roomId: string, serviceUrl: st
 export const leaveRtc = (client: ClientLike, roomId: string): Promise<void> =>
   putMembership(client, roomId, CLEARED_MEMBERSHIP);
 
+export const leaveWhenJoinSettles = (join: Promise<unknown>, leave: () => Promise<void>): Promise<void> =>
+  join.then(
+    () => leave().catch(() => undefined),
+    () => leave().catch(() => undefined),
+  );
+
 export const sfuClaims = (jwt: string): SfuClaims | null => {
   try {
     const [, payload] = jwt.split(".");
