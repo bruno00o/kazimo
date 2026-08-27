@@ -1,12 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import {
   adminSignalOf,
+  adminsOf,
+  canDemote,
   contactsOf,
   frameLinkFromState,
   frameLinkOf,
   frameMarkerOf,
+  frameSendersOf,
+  powerLevelOf,
   stateEventsOf,
   withAdminPower,
+  withoutAdminPower,
 } from "./frame";
 
 const FRAME = "@frame:matrix.example.org";
@@ -180,5 +185,72 @@ describe("withAdminPower", () => {
     expect(withAdminPower({}, ME)).toEqual({ users: { [ME]: 100 } });
     expect(withAdminPower(undefined, ME)).toEqual({ users: { [ME]: 100 } });
     expect(withAdminPower({ users: "broken" }, ME)).toEqual({ users: { [ME]: 100 } });
+  });
+});
+
+describe("withoutAdminPower", () => {
+  test("drops one entry and keeps the rest of the content", () => {
+    expect(
+      withoutAdminPower({ users: { [FRAME]: 100, [ME]: 100 }, events: { "dev.kazimo.contact": 100 } }, ME),
+    ).toEqual({ users: { [FRAME]: 100 }, events: { "dev.kazimo.contact": 100 } });
+  });
+
+  test("is a no-op when the user holds no explicit level", () => {
+    expect(withoutAdminPower({ users: { [FRAME]: 100 } }, ME)).toEqual({ users: { [FRAME]: 100 } });
+    expect(withoutAdminPower(undefined, ME)).toEqual({ users: {} });
+  });
+});
+
+describe("powerLevelOf", () => {
+  test("reads the explicit level", () => {
+    expect(powerLevelOf({ users: { [ME]: 100 } }, ME)).toBe(100);
+  });
+
+  test("falls back to the room default, then to zero", () => {
+    expect(powerLevelOf({ users: {}, users_default: 50 }, ME)).toBe(50);
+    expect(powerLevelOf({}, ME)).toBe(0);
+    expect(powerLevelOf({ users: { [ME]: "high" } }, ME)).toBe(0);
+  });
+});
+
+describe("adminsOf", () => {
+  const OTHER = "@rui:matrix.example.org";
+
+  test("keeps the users at the admin level, self first, without the frame itself", () => {
+    const levels = { users: { [FRAME]: 100, [OTHER]: 100, [ME]: 100, "@bea:matrix.example.org": 50 } };
+    expect(adminsOf(levels, FRAME, ME)).toEqual([
+      { userId: ME, level: 100, isSelf: true },
+      { userId: OTHER, level: 100, isSelf: false },
+    ]);
+  });
+
+  test("ignores malformed entries and empty content", () => {
+    expect(adminsOf({ users: { broken: 100, [ME]: "100" } }, FRAME, ME)).toEqual([]);
+    expect(adminsOf(undefined, FRAME, ME)).toEqual([]);
+  });
+});
+
+describe("canDemote", () => {
+  const OTHER = "@rui:matrix.example.org";
+
+  test("allows stepping down from one's own rights", () => {
+    expect(canDemote({ userId: ME, level: 100, isSelf: true }, 100)).toBe(true);
+  });
+
+  test("refuses a peer holding the same level", () => {
+    expect(canDemote({ userId: OTHER, level: 100, isSelf: false }, 100)).toBe(false);
+  });
+
+  test("allows demoting someone below oneself", () => {
+    expect(canDemote({ userId: OTHER, level: 50, isSelf: false }, 100)).toBe(true);
+  });
+});
+
+describe("frameSendersOf", () => {
+  test("collects the senders of a root frame status event", () => {
+    expect(frameSendersOf([stateEvent("dev.kazimo.frame", "", { hasAdmin: false })])).toEqual([FRAME]);
+    expect(frameSendersOf([stateEvent("dev.kazimo.frame", "extra", {})])).toEqual([]);
+    expect(frameSendersOf([stateEvent("dev.kazimo.frame", "", {}, "broken")])).toEqual([]);
+    expect(frameSendersOf([created(), marker()])).toEqual([]);
   });
 });

@@ -9,9 +9,17 @@ import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSw
 import ReanimatedSwipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ContextMenu, hasNativeContextMenu, type MenuAction, openActionsAlert } from "../src/ContextMenu";
-import { type FrameAccess, frameAccess } from "../src/frame";
+import { type FrameAccess, frameAccess, frameScopeOf } from "../src/frame";
 import { Icon } from "../src/Icon";
 import { appStrings } from "../src/i18n";
+import {
+  acceptInvite,
+  declineInvite,
+  type FrameScope,
+  localpartOf,
+  pendingInvites,
+  type RoomInvite,
+} from "../src/rooms";
 import {
   type Conversation,
   type ConversationsSubscription,
@@ -40,10 +48,12 @@ const LEAVE_SYMBOL = "rectangle.portrait.and.arrow.right";
 const ACTION_INK = "#ffffff";
 
 const AVATAR_SIZE = 56;
+const INVITE_AVATAR_SIZE = 44;
+const NO_INVITES: RoomInvite[] = [];
+const NOT_WORKING = null;
+const NO_FRAME_SCOPE: FrameScope = { controlRoomId: null, frameUserIds: [] };
 
 const swallowLongPress = () => {};
-
-const localpartOf = (userId: string) => userId.replace(/^@/, "").split(":")[0] ?? userId;
 
 const timeLabel = (timestamp: number, locale: string): string => {
   if (timestamp <= 0) return "";
@@ -160,18 +170,106 @@ function ConversationRow({
   );
 }
 
+function InviteRow({
+  client,
+  invite,
+  busy,
+  onAccept,
+  onDecline,
+}: {
+  client: ClientLike;
+  invite: RoomInvite;
+  busy: boolean;
+  onAccept: (invite: RoomInvite) => void;
+  onDecline: (invite: RoomInvite) => void;
+}) {
+  return (
+    <View style={styles.invite}>
+      <View style={styles.inviteHead}>
+        <Avatar
+          client={client}
+          mxc={invite.avatarUrl}
+          name={invite.name}
+          size={INVITE_AVATAR_SIZE}
+          shape="rounded"
+        />
+        <View style={styles.body}>
+          <Text style={styles.name} numberOfLines={1}>
+            {invite.name}
+          </Text>
+          <Text style={styles.preview} numberOfLines={1}>
+            {`${t.inviteFrom} ${invite.inviterName}`}
+          </Text>
+        </View>
+      </View>
+      <View style={styles.inviteActions}>
+        <Pressable
+          accessibilityRole="button"
+          style={[styles.inviteButton, busy && styles.inviteBusy]}
+          disabled={busy}
+          onPress={() => onDecline(invite)}
+        >
+          <Text style={styles.inviteDeclineText}>{t.inviteDecline}</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          style={[styles.inviteButton, styles.inviteAccept, busy && styles.inviteBusy]}
+          disabled={busy}
+          onPress={() => onAccept(invite)}
+        >
+          <Text style={styles.inviteAcceptText}>{t.inviteAccept}</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 export default function Home() {
   const { client, sync, signOut, identity } = useSession();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [list, setList] = useState<Conversation[]>([]);
   const [access, setAccess] = useState<FrameAccess | null>(null);
+  const [invites, setInvites] = useState<RoomInvite[]>(NO_INVITES);
+  const [working, setWorking] = useState<string | null>(NOT_WORKING);
+  const scope = useRef<FrameScope | null>(null);
 
   const refreshList = useCallback(() => {
     void conversations(client)
       .then(setList)
       .catch(() => {});
   }, [client]);
+
+  const refreshInvites = useCallback(() => {
+    const current = scope.current;
+    if (!current) return;
+    void pendingInvites(client, current)
+      .then(setInvites)
+      .catch(() => {});
+  }, [client]);
+
+  const refresh = useCallback(() => {
+    refreshList();
+    refreshInvites();
+  }, [refreshInvites, refreshList]);
+
+  const answerInvite = useCallback(
+    (invite: RoomInvite, join: boolean) => {
+      setWorking(invite.roomId);
+      const done = join ? acceptInvite(client, invite.roomId) : declineInvite(client, invite.roomId);
+      void done
+        .then(() => {
+          setInvites((current) => current.filter((pending) => pending.roomId !== invite.roomId));
+          refreshList();
+        })
+        .catch(() => Alert.alert(t.inviteFailed))
+        .finally(() => setWorking(NOT_WORKING));
+    },
+    [client, refreshList],
+  );
+
+  const joinInvite = useCallback((invite: RoomInvite) => answerInvite(invite, true), [answerInvite]);
+  const refuseInvite = useCallback((invite: RoomInvite) => answerInvite(invite, false), [answerInvite]);
 
   const confirmLeave = useCallback(
     (conversation: Conversation) => {
@@ -239,7 +337,10 @@ export default function Home() {
   useEffect(() => {
     let started: ConversationsSubscription | null = null;
     let cancelled = false;
-    void subscribeConversations(client, sync, setList)
+    void subscribeConversations(client, sync, (next) => {
+      setList(next);
+      refreshInvites();
+    })
       .then((subscription) => {
         if (cancelled) {
           subscription.stop();
@@ -252,21 +353,28 @@ export default function Home() {
       cancelled = true;
       started?.stop();
     };
-  }, [client, sync]);
+  }, [client, sync, refreshInvites]);
 
   useEffect(() => {
     let cancelled = false;
     void frameAccess(client)
       .then((found) => {
-        if (!cancelled) setAccess(found);
+        if (cancelled) return;
+        setAccess(found);
+        scope.current = frameScopeOf(found);
       })
-      .catch(() => {});
+      .catch(() => {
+        scope.current = NO_FRAME_SCOPE;
+      })
+      .finally(() => {
+        if (!cancelled) refreshInvites();
+      });
     return () => {
       cancelled = true;
     };
-  }, [client]);
+  }, [client, refreshInvites]);
 
-  useFocusEffect(refreshList);
+  useFocusEffect(refresh);
 
   const controlRoomId = access?.link?.controlRoomId ?? null;
   const showFrame = access !== null && (access.link !== null || !access.adminElsewhere);
@@ -309,6 +417,23 @@ export default function Home() {
         data={visible}
         keyExtractor={(conversation) => conversation.id}
         contentContainerStyle={styles.list}
+        ListHeaderComponent={
+          invites.length === 0 ? null : (
+            <View style={styles.invites}>
+              <Text style={styles.sectionTitle}>{t.invites}</Text>
+              {invites.map((invite) => (
+                <InviteRow
+                  key={invite.roomId}
+                  client={client}
+                  invite={invite}
+                  busy={working === invite.roomId}
+                  onAccept={joinInvite}
+                  onDecline={refuseInvite}
+                />
+              ))}
+            </View>
+          )
+        }
         ListEmptyComponent={
           <EmptyState icon="group" title={t.noConversations} body={t.noConversationsHint} />
         }
@@ -430,5 +555,57 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
     color: "#ffffff",
+  },
+  invites: {
+    gap: 10,
+    marginHorizontal: 20,
+    marginBottom: 18,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    color: tokens.theme.light.inkSoft,
+  },
+  invite: {
+    gap: 12,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: tokens.color.blueSoft,
+  },
+  inviteHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  inviteActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
+  },
+  inviteButton: {
+    minWidth: 110,
+    height: 44,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 18,
+    backgroundColor: tokens.theme.light.ground,
+  },
+  inviteAccept: {
+    backgroundColor: tokens.color.blue,
+  },
+  inviteBusy: {
+    opacity: 0.5,
+  },
+  inviteDeclineText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: tokens.theme.light.inkSoft,
+  },
+  inviteAcceptText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: tokens.color.onAccent,
   },
 });

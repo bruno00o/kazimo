@@ -10,7 +10,7 @@ import {
 } from "@kazimo/shared";
 import type { ClientLike } from "@unomed/react-native-matrix-sdk";
 import { authorizedFetch } from "./http";
-import { existingDirectRoom } from "./rooms";
+import { existingDirectRoom, type FrameScope } from "./rooms";
 
 type Sdk = typeof import("@unomed/react-native-matrix-sdk");
 
@@ -18,10 +18,16 @@ export type FrameLink = { frameUserId: string; controlRoomId: string };
 
 export type StateEvent = { type: string; stateKey: string; sender: string; content: unknown };
 
+export type FrameAdmin = { userId: string; level: number; isSelf: boolean };
+
+export type FrameAdmins = { admins: FrameAdmin[]; myLevel: number };
+
 const CREATE_EVENT_TYPE = "m.room.create";
 const POWER_LEVELS_EVENT_TYPE = "m.room.power_levels";
+const DEFAULT_POWER_LEVEL = 0;
 const CONTROL_MARKER_STATE_KEY = "";
 const REMOVED_CONTACT_CONTENT = {};
+const FORGOTTEN_FRAME = "{}";
 const DIRECT_MEMBER_LIMIT = 2n;
 
 const USER_ID = /^@[^\s:]+:[^\s:]+(?::[0-9]{1,5})?$/;
@@ -175,6 +181,35 @@ export const withAdminPower = (content: unknown, userId: string): Record<string,
   return { ...current, users: { ...users, [userId]: CONTROL_ADMIN_POWER_LEVEL } };
 };
 
+export const withoutAdminPower = (content: unknown, userId: string): Record<string, unknown> => {
+  const current = asRecord(content) ?? {};
+  const users = asRecord(current.users) ?? {};
+  const remaining = Object.entries(users).filter(([id]) => id !== userId);
+  return { ...current, users: Object.fromEntries(remaining) };
+};
+
+export const powerLevelOf = (content: unknown, userId: string): number => {
+  const current = asRecord(content) ?? {};
+  const level = asRecord(current.users)?.[userId];
+  if (typeof level === "number") return level;
+  return typeof current.users_default === "number" ? current.users_default : DEFAULT_POWER_LEVEL;
+};
+
+export const adminsOf = (content: unknown, frameUserId: string, me: string): FrameAdmin[] =>
+  Object.entries(asRecord(asRecord(content)?.users) ?? {})
+    .flatMap(([userId, level]) =>
+      typeof level === "number" &&
+      level >= CONTROL_ADMIN_POWER_LEVEL &&
+      userId !== frameUserId &&
+      USER_ID.test(userId)
+        ? [{ userId, level, isSelf: userId === me }]
+        : [],
+    )
+    .sort((a, b) => Number(b.isSelf) - Number(a.isSelf) || a.userId.localeCompare(b.userId));
+
+export const canDemote = (admin: FrameAdmin, myLevel: number): boolean =>
+  admin.isSelf || myLevel > admin.level;
+
 const inviteUser = async (client: ClientLike, roomId: string, userId: string): Promise<void> => {
   const res = await authorizedFetch(
     client,
@@ -214,21 +249,62 @@ export const promoteAdmin = async (
   await putRoomState(client, controlRoomId, POWER_LEVELS_EVENT_TYPE, "", withAdminPower(levels, userId));
 };
 
+export const frameAdmins = async (
+  client: ClientLike,
+  controlRoomId: string,
+  frameUserId: string,
+): Promise<FrameAdmins> => {
+  const me = client.userId();
+  const levels = await roomStateContent(client, controlRoomId, POWER_LEVELS_EVENT_TYPE, "");
+  return { admins: adminsOf(levels, frameUserId, me), myLevel: powerLevelOf(levels, me) };
+};
+
+export const demoteAdmin = async (
+  client: ClientLike,
+  controlRoomId: string,
+  userId: string,
+): Promise<void> => {
+  const levels = await roomStateContent(client, controlRoomId, POWER_LEVELS_EVENT_TYPE, "");
+  await putRoomState(client, controlRoomId, POWER_LEVELS_EVENT_TYPE, "", withoutAdminPower(levels, userId));
+};
+
+export const stepDownAdmin = async (client: ClientLike, link: FrameLink): Promise<void> => {
+  await demoteAdmin(client, link.controlRoomId, client.userId());
+  await client.setAccountData(FRAME_EVENT_TYPE, FORGOTTEN_FRAME).catch(() => undefined);
+  await client
+    .getRoom(link.controlRoomId)
+    ?.leave()
+    .catch(() => undefined);
+};
+
 export const adminSignalOf = (payload: unknown): boolean =>
   stateEventsOf(payload).some(
     (event) => event.type === FRAME_EVENT_TYPE && event.stateKey === "" && frameStatusOf(event.content),
   );
 
-const managedElsewhere = async (client: ClientLike): Promise<boolean> => {
+export const frameSendersOf = (payload: unknown): string[] =>
+  stateEventsOf(payload)
+    .filter((event) => event.type === FRAME_EVENT_TYPE && event.stateKey === "" && USER_ID.test(event.sender))
+    .map((event) => event.sender);
+
+type DirectScan = { frameUserIds: string[]; adminElsewhere: boolean };
+
+const EMPTY_SCAN: DirectScan = { frameUserIds: [], adminElsewhere: false };
+
+const scanFrameDirects = async (client: ClientLike): Promise<DirectScan> => {
   const { Membership } = await sdk();
+  const frameUserIds = new Set<string>();
+  let adminElsewhere = false;
   for (const room of client.rooms()) {
     if (room.membership() !== Membership.Joined) continue;
     const info = await room.roomInfo().catch(() => null);
     if (!info?.isDirect) continue;
     const state = await roomState(client, room.id()).catch(() => null);
-    if (state !== null && adminSignalOf(state)) return true;
+    if (state === null) continue;
+    for (const sender of frameSendersOf(state)) frameUserIds.add(sender);
+    if (adminSignalOf(state)) adminElsewhere = true;
   }
-  return false;
+  return { frameUserIds: [...frameUserIds], adminElsewhere };
 };
 
 export const frameMarkerOf = (payload: unknown): boolean =>
@@ -256,13 +332,19 @@ export const frameDirectRoom = async (client: ClientLike): Promise<string | null
   return scanFrameDirectRoom(client);
 };
 
-export type FrameAccess = { link: FrameLink | null; adminElsewhere: boolean };
+export type FrameAccess = { link: FrameLink | null; adminElsewhere: boolean; frameUserIds: string[] };
 
 export const frameAccess = async (client: ClientLike): Promise<FrameAccess> => {
   const link = await frameLink(client);
-  if (link) return { link, adminElsewhere: false };
-  return { link: null, adminElsewhere: await managedElsewhere(client) };
+  if (link) return { link, adminElsewhere: false, frameUserIds: [link.frameUserId] };
+  const scan = await scanFrameDirects(client).catch(() => EMPTY_SCAN);
+  return { link: null, adminElsewhere: scan.adminElsewhere, frameUserIds: scan.frameUserIds };
 };
+
+export const frameScopeOf = (access: FrameAccess): FrameScope => ({
+  controlRoomId: access.link?.controlRoomId ?? null,
+  frameUserIds: access.frameUserIds,
+});
 
 export const profileName = async (client: ClientLike, userId: string): Promise<string> => {
   const profile = await client.getProfile(userId).catch(() => null);

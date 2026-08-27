@@ -31,9 +31,15 @@ export interface Strings {
   frameRemove: string;
   frameAdmins: string;
   frameAdminsBody: string;
+  frameAdminsNone: string;
   framePromote: string;
   framePromoteConfirmBody: string;
   framePromoteFailed: string;
+  frameDemote: string;
+  frameDemoteConfirmBody: string;
+  frameDemoteFailed: string;
+  frameStepDown: string;
+  frameStepDownConfirmBody: string;
   newConversation: string;
   newDirect: string;
   newGroup: string;
@@ -90,6 +96,14 @@ export interface Strings {
   typingMany: string;
   sent: string;
   read: string;
+  notSent: string;
+  retrySend: string;
+  deleteMessage: string;
+  invites: string;
+  inviteFrom: string;
+  inviteAccept: string;
+  inviteDecline: string;
+  inviteFailed: string;
   micOff: string;
   micOn: string;
   cameraOff: string;
@@ -110,6 +124,7 @@ export interface Strings {
   callChannel: string;
   inCall: string;
   missedCall: string;
+  newMessage: string;
 }
 
 const en: Strings = {
@@ -144,9 +159,15 @@ const en: Strings = {
   frameRemove: "Remove",
   frameAdmins: "Administrators",
   frameAdminsBody: "An administrator can manage the contacts of this frame.",
+  frameAdminsNone: "No administrators yet",
   framePromote: "Make administrator",
   framePromoteConfirmBody: "This person will be able to manage the contacts of the frame.",
   framePromoteFailed: "This person could not be made administrator.",
+  frameDemote: "Remove administrator",
+  frameDemoteConfirmBody: "This person will no longer be able to manage the frame.",
+  frameDemoteFailed: "These rights could not be removed.",
+  frameStepDown: "Stop administering",
+  frameStepDownConfirmBody: "You will no longer be able to manage this frame.",
   newConversation: "New conversation",
   newDirect: "New message",
   newGroup: "New group",
@@ -202,6 +223,14 @@ const en: Strings = {
   typingMany: "are typing",
   sent: "Sent",
   read: "Read",
+  notSent: "Not sent",
+  retrySend: "Try again",
+  deleteMessage: "Delete the message",
+  invites: "Invitations",
+  inviteFrom: "Invited by",
+  inviteAccept: "Join",
+  inviteDecline: "Decline",
+  inviteFailed: "The invitation could not be handled.",
   micOff: "Mute mic",
   micOn: "Unmute mic",
   cameraOff: "Turn camera off",
@@ -222,6 +251,7 @@ const en: Strings = {
   callChannel: "Kazimo calls",
   inCall: "Kazimo in a call",
   missedCall: "Missed call",
+  newMessage: "New message",
 };
 
 const fr: Strings = {
@@ -256,9 +286,15 @@ const fr: Strings = {
   frameRemove: "Retirer",
   frameAdmins: "Administrateurs",
   frameAdminsBody: "Un administrateur peut gérer les contacts de ce cadre.",
+  frameAdminsNone: "Pas encore d'administrateur",
   framePromote: "Nommer administrateur",
   framePromoteConfirmBody: "Cette personne pourra gérer les contacts du cadre.",
   framePromoteFailed: "Cette personne n'a pas pu être nommée administrateur.",
+  frameDemote: "Retirer l'administrateur",
+  frameDemoteConfirmBody: "Cette personne ne pourra plus gérer le cadre.",
+  frameDemoteFailed: "Ces droits n'ont pas pu être retirés.",
+  frameStepDown: "Ne plus administrer",
+  frameStepDownConfirmBody: "Vous ne pourrez plus gérer ce cadre.",
   newConversation: "Nouvelle conversation",
   newDirect: "Nouveau message",
   newGroup: "Nouveau groupe",
@@ -316,6 +352,14 @@ const fr: Strings = {
   typingMany: "écrivent",
   sent: "Envoyé",
   read: "Lu",
+  notSent: "Non envoyé",
+  retrySend: "Réessayer",
+  deleteMessage: "Supprimer le message",
+  invites: "Invitations",
+  inviteFrom: "Invitation de",
+  inviteAccept: "Rejoindre",
+  inviteDecline: "Refuser",
+  inviteFailed: "L'invitation n'a pas pu être traitée.",
   micOff: "Couper le micro",
   micOn: "Réactiver le micro",
   cameraOff: "Couper la caméra",
@@ -336,6 +380,7 @@ const fr: Strings = {
   callChannel: "Appels Kazimo",
   inCall: "Kazimo en appel",
   missedCall: "Appel manqué",
+  newMessage: "Nouveau message",
 };
 
 const ptPT: Strings = {
@@ -370,9 +415,15 @@ const ptPT: Strings = {
   frameRemove: "Remover",
   frameAdmins: "Administradores",
   frameAdminsBody: "Um administrador pode gerir os contactos desta moldura.",
+  frameAdminsNone: "Ainda sem administradores",
   framePromote: "Tornar administrador",
   framePromoteConfirmBody: "Esta pessoa passa a poder gerir os contactos da moldura.",
   framePromoteFailed: "Não foi possível tornar esta pessoa administrador.",
+  frameDemote: "Retirar o administrador",
+  frameDemoteConfirmBody: "Esta pessoa deixa de poder gerir a moldura.",
+  frameDemoteFailed: "Não foi possível retirar estes direitos.",
+  frameStepDown: "Deixar de administrar",
+  frameStepDownConfirmBody: "Deixas de poder gerir esta moldura.",
   newConversation: "Nova conversa",
   newDirect: "Nova mensagem",
   newGroup: "Novo grupo",
@@ -429,6 +480,14 @@ const ptPT: Strings = {
   typingMany: "estão a escrever",
   sent: "Enviada",
   read: "Lida",
+  notSent: "Não enviada",
+  retrySend: "Tentar novamente",
+  deleteMessage: "Eliminar a mensagem",
+  invites: "Convites",
+  inviteFrom: "Convite de",
+  inviteAccept: "Entrar",
+  inviteDecline: "Recusar",
+  inviteFailed: "Não foi possível tratar o convite.",
   micOff: "Desligar microfone",
   micOn: "Ligar microfone",
   cameraOff: "Desligar câmara",
@@ -449,6 +508,7 @@ const ptPT: Strings = {
   callChannel: "Chamadas Kazimo",
   inCall: "Kazimo em chamada",
   missedCall: "Chamada perdida",
+  newMessage: "Nova mensagem",
 };
 
 const es: Strings = {
@@ -483,9 +543,15 @@ const es: Strings = {
   frameRemove: "Quitar",
   frameAdmins: "Administradores",
   frameAdminsBody: "Un administrador puede gestionar los contactos de este marco.",
+  frameAdminsNone: "Aún no hay administradores",
   framePromote: "Hacer administrador",
   framePromoteConfirmBody: "Esta persona podrá gestionar los contactos del marco.",
   framePromoteFailed: "No se pudo hacer administrador a esta persona.",
+  frameDemote: "Quitar el administrador",
+  frameDemoteConfirmBody: "Esta persona ya no podrá gestionar el marco.",
+  frameDemoteFailed: "No se pudieron quitar estos permisos.",
+  frameStepDown: "Dejar de administrar",
+  frameStepDownConfirmBody: "Ya no podrás gestionar este marco.",
   newConversation: "Nueva conversación",
   newDirect: "Nuevo mensaje",
   newGroup: "Nuevo grupo",
@@ -543,6 +609,14 @@ const es: Strings = {
   typingMany: "están escribiendo",
   sent: "Enviado",
   read: "Leído",
+  notSent: "No enviado",
+  retrySend: "Reintentar",
+  deleteMessage: "Eliminar el mensaje",
+  invites: "Invitaciones",
+  inviteFrom: "Invitación de",
+  inviteAccept: "Unirse",
+  inviteDecline: "Rechazar",
+  inviteFailed: "No se pudo tratar la invitación.",
   micOff: "Silenciar micro",
   micOn: "Activar micro",
   cameraOff: "Apagar cámara",
@@ -563,6 +637,7 @@ const es: Strings = {
   callChannel: "Llamadas Kazimo",
   inCall: "Kazimo en llamada",
   missedCall: "Llamada perdida",
+  newMessage: "Nuevo mensaje",
 };
 
 const byLang: Record<string, Strings> = { en, fr, es, pt: ptPT, "pt-PT": ptPT };

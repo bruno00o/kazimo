@@ -1,8 +1,18 @@
-import type { ClientLike, PowerLevels } from "@unomed/react-native-matrix-sdk";
+import type { ClientLike, PowerLevels, RoomLike } from "@unomed/react-native-matrix-sdk";
 
 type Sdk = typeof import("@unomed/react-native-matrix-sdk");
 
 export type DirectRooms = Record<string, string[]>;
+
+export type RoomInvite = {
+  roomId: string;
+  name: string;
+  avatarUrl: string | null;
+  inviterId: string;
+  inviterName: string;
+};
+
+export type FrameScope = { controlRoomId: string | null; frameUserIds: readonly string[] };
 
 const DIRECT_EVENT_TYPE = "m.direct";
 const ADMIN_POWER_LEVEL = 100;
@@ -12,6 +22,9 @@ const RTC_MEMBER_EVENT_TYPES = [
   "org.matrix.msc3401.call.member",
   "io.element.rtc.member",
 ] as const;
+
+const USER_ID_PREFIX = "@";
+const USER_ID_SEPARATOR = ":";
 
 const LOCALPART = /^[a-zA-Z0-9._=/+-]+$/;
 const HOSTNAME_LABEL = "[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?";
@@ -33,6 +46,12 @@ const serverName = (raw: string): string | null => {
 export const defaultServerFrom = (homeserver: string): string | null => {
   const host = HOMESERVER_HOST.exec(homeserver.trim())?.[1];
   return host ? serverName(host) : null;
+};
+
+export const localpartOf = (userId: string): string => {
+  const withoutPrefix = userId.startsWith(USER_ID_PREFIX) ? userId.slice(USER_ID_PREFIX.length) : userId;
+  const separator = withoutPrefix.indexOf(USER_ID_SEPARATOR);
+  return separator === -1 ? withoutPrefix : withoutPrefix.slice(0, separator);
 };
 
 export const normalizeMatrixId = (input: string, defaultServer: string): string | null => {
@@ -119,6 +138,44 @@ export const createDirect = async (client: ClientLike, userId: string): Promise<
   });
   await rememberDirect(client, userId, roomId).catch(() => undefined);
   return roomId;
+};
+
+export const isFrameInvite = (invite: RoomInvite, scope: FrameScope): boolean =>
+  invite.roomId === scope.controlRoomId || scope.frameUserIds.includes(invite.inviterId);
+
+const NO_INVITER = "";
+
+const inviteOf = async (room: RoomLike): Promise<RoomInvite> => {
+  const roomId = room.id();
+  const info = await room.roomInfo().catch(() => null);
+  const inviterId = info?.inviter?.userId ?? NO_INVITER;
+  const inviterName = info?.inviter?.displayName ?? localpartOf(inviterId);
+  return {
+    roomId,
+    name: info?.displayName ?? roomId,
+    avatarUrl: info?.avatarUrl ?? null,
+    inviterId,
+    inviterName,
+  };
+};
+
+export const pendingInvites = async (client: ClientLike, scope: FrameScope): Promise<RoomInvite[]> => {
+  const { Membership } = await sdk();
+  const invited = client.rooms().filter((room) => room.membership() === Membership.Invited);
+  const invites = await Promise.all(invited.map(inviteOf));
+  const fromFrame = invites.filter((invite) => isFrameInvite(invite, scope));
+  await Promise.all(fromFrame.map((invite) => client.joinRoomById(invite.roomId).catch(() => undefined)));
+  return invites.filter((invite) => !isFrameInvite(invite, scope));
+};
+
+export const acceptInvite = async (client: ClientLike, roomId: string): Promise<void> => {
+  await client.joinRoomById(roomId);
+};
+
+export const declineInvite = async (client: ClientLike, roomId: string): Promise<void> => {
+  const room = client.getRoom(roomId);
+  if (!room) return;
+  await room.leave();
 };
 
 export const createGroup = async (

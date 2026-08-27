@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
   defaultServerFrom,
   directRoomsOf,
+  isFrameInvite,
+  localpartOf,
   normalizeMatrixId,
+  type RoomInvite,
   rtcPowerLevelOverride,
   withDirectRoom,
 } from "./rooms";
@@ -168,5 +171,45 @@ describe("withDirectRoom", () => {
   test("returns the same map when the room is already known", () => {
     const current = { "@ana:example.org": ["!a:example.org"] };
     expect(withDirectRoom(current, "@ana:example.org", "!a:example.org")).toBe(current);
+  });
+});
+
+describe("localpartOf", () => {
+  test("strips the sigil and the server", () => {
+    expect(localpartOf("@ana:matrix.example.org")).toBe("ana");
+    expect(localpartOf("ana:matrix.example.org")).toBe("ana");
+    expect(localpartOf("ana")).toBe("ana");
+  });
+});
+
+describe("isFrameInvite", () => {
+  const FRAME = "@frame:example.org";
+  const CONTROL_ROOM = "!control:example.org";
+
+  const invite = (roomId: string, inviterId: string): RoomInvite => ({
+    roomId,
+    name: "Kazimo",
+    avatarUrl: null,
+    inviterId,
+    inviterName: "Kazimo",
+  });
+
+  const scope = { controlRoomId: CONTROL_ROOM, frameUserIds: [FRAME] };
+
+  test("accepts the control room whoever invited", () => {
+    expect(isFrameInvite(invite(CONTROL_ROOM, "@ana:example.org"), scope)).toBe(true);
+  });
+
+  test("accepts any room the frame invited to", () => {
+    expect(isFrameInvite(invite("!dm:example.org", FRAME), scope)).toBe(true);
+  });
+
+  test("leaves the invites of other people to the user", () => {
+    expect(isFrameInvite(invite("!group:example.org", "@rui:example.org"), scope)).toBe(false);
+  });
+
+  test("asks for everything when no frame is known", () => {
+    const unpaired = { controlRoomId: null, frameUserIds: [] };
+    expect(isFrameInvite(invite("!dm:example.org", FRAME), unpaired)).toBe(false);
   });
 });

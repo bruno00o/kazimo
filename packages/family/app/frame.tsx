@@ -14,17 +14,22 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
+  canDemote,
+  demoteAdmin,
+  type FrameAdmin,
   type FrameLink,
+  frameAdmins,
   frameContacts,
   frameLink,
   profileName,
   promoteAdmin,
   removeFrameContact,
   setFrameContact,
+  stepDownAdmin,
 } from "../src/frame";
 import { Icon } from "../src/Icon";
 import { appStrings } from "../src/i18n";
-import { defaultServerFrom, normalizeMatrixId } from "../src/rooms";
+import { defaultServerFrom, localpartOf, normalizeMatrixId } from "../src/rooms";
 import { useSession } from "../src/session-context";
 import { Failure, Field, PrimaryButton, ScreenHeader, Segmented } from "../src/ui";
 
@@ -32,6 +37,8 @@ const t = appStrings();
 
 const FRAME_ICON_SIZE = 34;
 const ROW_ICON_SIZE = 20;
+const NO_POWER = 0;
+const NO_NAMES: Record<string, string> = {};
 
 type Tab = "contacts" | "admins";
 
@@ -44,13 +51,16 @@ const TAB_OPTIONS = [
   { key: "admins", label: t.frameAdmins },
 ] as const;
 
-export default function FrameAdmin() {
+export default function FrameAdminScreen() {
   const { client, homeserver } = useSession();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [phase, setPhase] = useState<Phase>(LOADING);
   const [tab, setTab] = useState<Tab>("contacts");
   const [contacts, setContacts] = useState<FrameContact[]>([]);
+  const [admins, setAdmins] = useState<FrameAdmin[]>([]);
+  const [adminNames, setAdminNames] = useState<Record<string, string>>(NO_NAMES);
+  const [myLevel, setMyLevel] = useState(NO_POWER);
   const [contactId, setContactId] = useState("");
   const [contactName, setContactName] = useState("");
   const [adminId, setAdminId] = useState("");
@@ -60,13 +70,17 @@ export default function FrameAdmin() {
   const defaultServer = useMemo(() => defaultServerFrom(homeserver) ?? "", [homeserver]);
 
   const reload = useCallback(
-    async (controlRoomId: string) => {
-      const list = await frameContacts(client, controlRoomId).catch(() => null);
-      if (list === null) {
-        setFailure(t.frameLoadFailed);
-        return;
+    async (link: FrameLink) => {
+      const [list, rights] = await Promise.all([
+        frameContacts(client, link.controlRoomId).catch(() => null),
+        frameAdmins(client, link.controlRoomId, link.frameUserId).catch(() => null),
+      ]);
+      if (list !== null) setContacts(list);
+      if (rights !== null) {
+        setAdmins(rights.admins);
+        setMyLevel(rights.myLevel);
       }
-      setContacts(list);
+      if (list === null || rights === null) setFailure(t.frameLoadFailed);
     },
     [client],
   );
@@ -82,12 +96,27 @@ export default function FrameAdmin() {
           return;
         }
         setPhase({ kind: "ready", link: found });
-        await reload(found.controlRoomId);
+        await reload(found);
       });
     return () => {
       cancelled = true;
     };
   }, [client, reload, router]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all(
+      admins.map(async (admin) => [admin.userId, await profileName(client, admin.userId)] as const),
+    )
+      .then((resolved) => {
+        if (cancelled) return;
+        setAdminNames(Object.fromEntries(resolved.filter(([, name]) => name.length > 0)));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [admins, client]);
 
   const selectTab = useCallback((next: Tab) => {
     setTab(next);
@@ -116,7 +145,7 @@ export default function FrameAdmin() {
       await setFrameContact(client, phase.link.controlRoomId, userId, name);
       setContactId("");
       setContactName("");
-      await reload(phase.link.controlRoomId);
+      await reload(phase.link);
     } catch {
       setFailure(t.frameAddFailed);
     } finally {
@@ -127,7 +156,7 @@ export default function FrameAdmin() {
   const confirmRemove = useCallback(
     (contact: FrameContact) => {
       if (phase.kind !== "ready") return;
-      const controlRoomId = phase.link.controlRoomId;
+      const link = phase.link;
       Alert.alert(t.frameRemoveContact, t.frameRemoveConfirmBody, [
         { text: t.cancel, style: "cancel" },
         {
@@ -135,8 +164,8 @@ export default function FrameAdmin() {
           style: "destructive",
           onPress: () => {
             setFailure(null);
-            void removeFrameContact(client, controlRoomId, contact.userId)
-              .then(() => reload(controlRoomId))
+            void removeFrameContact(client, link.controlRoomId, contact.userId)
+              .then(() => reload(link))
               .catch(() => setFailure(t.frameRemoveFailed));
           },
         },
@@ -153,15 +182,16 @@ export default function FrameAdmin() {
       setFailure(t.framePromoteFailed);
       return;
     }
-    const controlRoomId = phase.link.controlRoomId;
+    const link = phase.link;
     Alert.alert(t.framePromote, t.framePromoteConfirmBody, [
       { text: t.cancel, style: "cancel" },
       {
         text: t.framePromote,
         onPress: () => {
           setPending(true);
-          void promoteAdmin(client, controlRoomId, userId)
+          void promoteAdmin(client, link.controlRoomId, userId)
             .then(() => setAdminId(""))
+            .then(() => reload(link))
             .catch((error) => {
               console.error("promote failed", error);
               setFailure(t.framePromoteFailed);
@@ -170,7 +200,37 @@ export default function FrameAdmin() {
         },
       },
     ]);
-  }, [adminId, client, defaultServer, pending, phase]);
+  }, [adminId, client, defaultServer, pending, phase, reload]);
+
+  const confirmDemote = useCallback(
+    (admin: FrameAdmin) => {
+      if (pending || phase.kind !== "ready") return;
+      const link = phase.link;
+      const label = admin.isSelf ? t.frameStepDown : t.frameDemote;
+      const body = admin.isSelf ? t.frameStepDownConfirmBody : t.frameDemoteConfirmBody;
+      Alert.alert(label, body, [
+        { text: t.cancel, style: "cancel" },
+        {
+          text: label,
+          style: "destructive",
+          onPress: () => {
+            setFailure(null);
+            setPending(true);
+            const done = admin.isSelf
+              ? stepDownAdmin(client, link).then(() => router.replace("/"))
+              : demoteAdmin(client, link.controlRoomId, admin.userId).then(() => reload(link));
+            void done
+              .catch((error) => {
+                console.error("demote failed", error);
+                setFailure(t.frameDemoteFailed);
+              })
+              .finally(() => setPending(false));
+          },
+        },
+      ]);
+    },
+    [client, pending, phase, reload, router],
+  );
 
   if (phase.kind === "loading") {
     return (
@@ -264,6 +324,34 @@ export default function FrameAdmin() {
         ) : (
           <View style={styles.section}>
             <Text style={styles.body}>{t.frameAdminsBody}</Text>
+            {admins.length === 0 ? (
+              <Text style={styles.emptyLine}>{t.frameAdminsNone}</Text>
+            ) : (
+              admins.map((admin) => (
+                <View key={admin.userId} style={styles.contact}>
+                  <View style={styles.contactBody}>
+                    <Text style={styles.contactName} numberOfLines={1}>
+                      {adminNames[admin.userId] ?? localpartOf(admin.userId)}
+                    </Text>
+                    <Text style={styles.contactId} numberOfLines={1}>
+                      {admin.userId}
+                    </Text>
+                  </View>
+                  {admin.isSelf && <Text style={styles.selfTag}>{t.you}</Text>}
+                  {canDemote(admin, myLevel) && (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={admin.isSelf ? t.frameStepDown : t.frameDemote}
+                      style={styles.contactAction}
+                      disabled={pending}
+                      onPress={() => confirmDemote(admin)}
+                    >
+                      <Icon name="adminOff" color={tokens.color.danger} size={ROW_ICON_SIZE} />
+                    </Pressable>
+                  )}
+                </View>
+              ))
+            )}
             <Field
               label={t.matrixId}
               value={adminId}
@@ -366,5 +454,15 @@ const styles = StyleSheet.create({
     height: 44,
     alignItems: "center",
     justifyContent: "center",
+  },
+  selfTag: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    overflow: "hidden",
+    fontSize: 13,
+    fontWeight: "600",
+    color: tokens.color.blueDeep,
+    backgroundColor: tokens.color.blueSoft,
   },
 });

@@ -22,6 +22,7 @@ const {
   receiptUserIdsOf,
   senderNameOf,
   sendStateOf,
+  statusOf,
   typingNamesOf,
   uploadPathOf,
 } = await import("./timeline");
@@ -450,5 +451,27 @@ describe("uploadPathOf", () => {
   test("the rust sdk wants a system path, not a file uri", () => {
     expect(uploadPathOf("file:///var/photo.jpg")).toBe("/var/photo.jpg");
     expect(uploadPathOf("/var/photo.jpg")).toBe("/var/photo.jpg");
+  });
+});
+
+describe("statusOf", () => {
+  const statuses = (entries: Parameters<typeof chatItemsOf>[0]) =>
+    messages(chatItemsOf(entries, ME)).map(statusOf);
+
+  test("a failed message never reads as delivered", () => {
+    expect(statuses([entry({ id: "1", senderId: ME, sendState: "failed" })])).toEqual(["failed"]);
+  });
+
+  test("follows the delivery state of the other outgoing messages", () => {
+    const entries = [
+      entry({ id: "1", senderId: ME, sendState: "pending" }),
+      entry({ id: "2", senderId: ME, timestamp: at(20, 10) }),
+    ];
+    expect(statuses(entries)).toEqual(["pending", "sent"]);
+  });
+
+  test("nothing to show on a message received or on a day marker", () => {
+    expect(statuses([entry({ id: "1" })])).toEqual([null]);
+    expect(chatItemsOf([entry({ id: "1" })], ME).map(statusOf)[0]).toBe(null);
   });
 });

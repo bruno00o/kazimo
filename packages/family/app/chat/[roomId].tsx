@@ -17,6 +17,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ContextMenu, hasNativeContextMenu, type MenuAction, openActionsAlert } from "../../src/ContextMenu";
 import { Icon } from "../../src/Icon";
 import { appStrings } from "../../src/i18n";
 import {
@@ -30,9 +31,21 @@ import {
 } from "../../src/media";
 import { type Conversation, conversationFor } from "../../src/session";
 import { useSession } from "../../src/session-context";
-import { type ChatItem, openTimeline, type TimelineSource } from "../../src/timeline";
+import { type ChatItem, openTimeline, statusOf, type TimelineSource } from "../../src/timeline";
 
 const t = appStrings();
+
+const RETRY_ACTION = "retry";
+const DISCARD_ACTION = "discard";
+const RETRY_SYMBOL = "arrow.clockwise";
+const DISCARD_SYMBOL = "trash";
+
+const FAILED_ACTIONS: MenuAction[] = [
+  { key: RETRY_ACTION, title: t.retrySend, systemImage: RETRY_SYMBOL },
+  { key: DISCARD_ACTION, title: t.deleteMessage, systemImage: DISCARD_SYMBOL, destructive: true },
+];
+
+const swallowLongPress = () => {};
 
 const READ_RECEIPT_DELAY_MS = 400;
 const TYPING_THROTTLE_MS = 4000;
@@ -214,6 +227,20 @@ export default function ChatScreen() {
     }
   }, []);
 
+  const runFailedAction = useCallback((actionKey: string, itemId: string) => {
+    const current = source.current;
+    if (!current) return;
+    if (actionKey === RETRY_ACTION) void current.retry(itemId).catch(() => {});
+    if (actionKey === DISCARD_ACTION) void current.discard(itemId).catch(() => {});
+  }, []);
+
+  const openFailedActions = useCallback(
+    (itemId: string) => {
+      openActionsAlert(t.notSent, FAILED_ACTIONS, t.cancel, (key) => runFailedAction(key, itemId));
+    },
+    [runFailedAction],
+  );
+
   const openPhoto = useCallback((photo: ViewedPhoto) => setViewed(photo), []);
   const closePhoto = useCallback(() => setViewed(null), []);
   const resolveSource = useCallback((mxc: string) => source.current?.mediaSourceOf(mxc) ?? null, []);
@@ -281,6 +308,8 @@ export default function ChatScreen() {
               client={client}
               resolveSource={resolveSource}
               onOpenPhoto={openPhoto}
+              onFailedAction={runFailedAction}
+              onOpenFailedActions={openFailedActions}
             />
           )}
         />
@@ -401,6 +430,8 @@ function Row({
   client,
   resolveSource,
   onOpenPhoto,
+  onFailedAction,
+  onOpenFailedActions,
 }: {
   item: ChatItem;
   grouped: boolean;
@@ -408,53 +439,84 @@ function Row({
   client: ClientLike;
   resolveSource: (mxc: string) => string | null;
   onOpenPhoto: (photo: ViewedPhoto) => void;
+  onFailedAction: (actionKey: string, itemId: string) => void;
+  onOpenFailedActions: (itemId: string) => void;
 }) {
   if (item.kind === "dayMarker") {
     return <Text style={styles.dayMarker}>{dayOf(item.timestamp)}</Text>;
   }
   const mine = item.mine;
   const isPhoto = item.kind === "image";
+  const status = statusOf(item);
+  const failed = status === "failed";
+  const bubble = (
+    <View
+      style={[
+        styles.bubble,
+        mine ? styles.bubbleMine : styles.bubbleTheirs,
+        isPhoto && styles.bubblePhoto,
+        status === "pending" && styles.bubblePending,
+        failed && styles.bubbleFailed,
+      ]}
+    >
+      {showSender && !mine && !grouped && (
+        <Text style={[styles.sender, isPhoto && styles.photoInsetTop]}>{item.senderName}</Text>
+      )}
+      {item.kind === "text" ? (
+        <Text style={[styles.bodyText, mine && styles.bodyTextMine]}>{item.body}</Text>
+      ) : (
+        <PhotoBubble
+          client={client}
+          item={item}
+          media={{ mxc: item.mxc, json: resolveSource(item.mxc) }}
+          onOpenPhoto={onOpenPhoto}
+        />
+      )}
+      {item.kind === "image" && item.caption !== null && (
+        <Text style={[styles.bodyText, mine && styles.bodyTextMine, styles.photoInset]}>{item.caption}</Text>
+      )}
+      <View style={[styles.metaRow, isPhoto && styles.photoInsetBottom]}>
+        <Text style={[styles.meta, mine && styles.metaMine]}>{timeOf(item.timestamp)}</Text>
+        {(status === "sent" || status === "read") && (
+          <View accessibilityLabel={status === "read" ? t.read : t.sent}>
+            <Icon name={status === "read" ? "read" : "sent"} color={MINE_META_COLOR} size={TICK_SIZE} />
+          </View>
+        )}
+      </View>
+    </View>
+  );
   return (
     <View style={[styles.bubbleRow, mine && styles.bubbleRowMine, grouped && styles.bubbleRowGrouped]}>
-      <View
-        style={[
-          styles.bubble,
-          mine ? styles.bubbleMine : styles.bubbleTheirs,
-          isPhoto && styles.bubblePhoto,
-          item.delivery === "pending" && styles.bubblePending,
-          item.failed && styles.bubbleFailed,
-        ]}
-      >
-        {showSender && !mine && !grouped && (
-          <Text style={[styles.sender, isPhoto && styles.photoInsetTop]}>{item.senderName}</Text>
-        )}
-        {item.kind === "text" ? (
-          <Text style={[styles.bodyText, mine && styles.bodyTextMine]}>{item.body}</Text>
+      <View style={[styles.bubbleColumn, mine && styles.bubbleColumnMine]}>
+        {failed ? (
+          <ContextMenu
+            title={t.notSent}
+            actions={FAILED_ACTIONS}
+            onAction={(key) => onFailedAction(key, item.id)}
+          >
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t.notSent}
+              onPress={() => onOpenFailedActions(item.id)}
+              onLongPress={hasNativeContextMenu ? swallowLongPress : () => onOpenFailedActions(item.id)}
+            >
+              {bubble}
+            </Pressable>
+          </ContextMenu>
         ) : (
-          <PhotoBubble
-            client={client}
-            item={item}
-            media={{ mxc: item.mxc, json: resolveSource(item.mxc) }}
-            onOpenPhoto={onOpenPhoto}
-          />
+          bubble
         )}
-        {item.kind === "image" && item.caption !== null && (
-          <Text style={[styles.bodyText, mine && styles.bodyTextMine, styles.photoInset]}>
-            {item.caption}
-          </Text>
+        {failed && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t.retrySend}
+            style={styles.failedNote}
+            onPress={() => onOpenFailedActions(item.id)}
+          >
+            <Icon name="failed" color={tokens.color.danger} size={TICK_SIZE} />
+            <Text style={styles.failedText}>{t.notSent}</Text>
+          </Pressable>
         )}
-        <View style={[styles.metaRow, isPhoto && styles.photoInsetBottom]}>
-          <Text style={[styles.meta, mine && styles.metaMine]}>{timeOf(item.timestamp)}</Text>
-          {mine && item.delivery !== "pending" && (
-            <View accessibilityLabel={item.delivery === "read" ? t.read : t.sent}>
-              <Icon
-                name={item.delivery === "read" ? "read" : "sent"}
-                color={MINE_META_COLOR}
-                size={TICK_SIZE}
-              />
-            </View>
-          )}
-        </View>
       </View>
     </View>
   );
@@ -526,8 +588,15 @@ const styles = StyleSheet.create({
   bubbleRowGrouped: {
     marginTop: 0,
   },
-  bubble: {
+  bubbleColumn: {
     maxWidth: "78%",
+    alignItems: "flex-start",
+    gap: 3,
+  },
+  bubbleColumnMine: {
+    alignItems: "flex-end",
+  },
+  bubble: {
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 20,
@@ -564,7 +633,20 @@ const styles = StyleSheet.create({
     opacity: 0.55,
   },
   bubbleFailed: {
-    backgroundColor: tokens.color.dangerSoft,
+    borderWidth: 1,
+    borderColor: tokens.color.danger,
+  },
+  failedNote: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  failedText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: tokens.color.danger,
   },
   sender: {
     fontSize: 13,

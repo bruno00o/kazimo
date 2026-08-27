@@ -4,6 +4,7 @@ import {
   messageEventContentFromMarkdown,
   ReceiptType,
   type RoomLike,
+  type SendHandleLike,
   type TaskHandleLike,
   type TimelineItemLike,
   type TimelineLike,
@@ -298,6 +299,13 @@ export const chatItemsOf = (
   return items;
 };
 
+export type MessageStatus = DeliveryState | "failed";
+
+export const statusOf = (item: ChatItem): MessageStatus | null => {
+  if (item.kind === "dayMarker" || !item.mine) return null;
+  return item.failed ? "failed" : item.delivery;
+};
+
 export const readSetOf = (entries: readonly TimelineEntry[]): ReadonlySet<string> =>
   readUpTo(
     entries.map((entry) => entry.id),
@@ -321,6 +329,8 @@ export type TimelineSource = {
   loadOlder: () => Promise<boolean>;
   send: (body: string) => Promise<void>;
   sendPhoto: (photo: PhotoToSend) => Promise<void>;
+  retry: (itemId: string) => Promise<void>;
+  discard: (itemId: string) => Promise<void>;
   setTyping: (active: boolean) => Promise<void>;
   markLatestRead: () => Promise<void>;
   mediaSourceOf: (mxc: string) => string | null;
@@ -377,6 +387,21 @@ export const openTimeline = async (
   let acknowledged: string | null = null;
 
   const nameOf = (userId: string) => names.get(userId) ?? localpartOf(userId);
+
+  const sendHandleOf = (itemId: string): SendHandleLike | null => {
+    for (const item of raw) {
+      const handle = ((): SendHandleLike | null => {
+        try {
+          if (item.uniqueId().id !== itemId) return null;
+          return item.asEvent()?.lazyProvider.getSendHandle() ?? null;
+        } catch {
+          return null;
+        }
+      })();
+      if (handle) return handle;
+    }
+    return null;
+  };
 
   const recompute = () => {
     const entries = raw
@@ -436,6 +461,17 @@ export const openTimeline = async (
         source: new UploadSource.File({ filename: uploadPathOf(photo.uri) }),
       };
       await timeline.sendImage(params, undefined, imageInfoOf(photo)).join();
+    },
+    async retry(itemId) {
+      const handle = sendHandleOf(itemId);
+      if (!handle) return;
+      room.enableSendQueue(true);
+      await handle.tryResend();
+    },
+    async discard(itemId) {
+      const handle = sendHandleOf(itemId);
+      if (!handle) return;
+      await handle.abort();
     },
     async setTyping(active) {
       await room.typingNotice(active);

@@ -62,12 +62,6 @@ export const setDeviceName = async (
   if (!res.ok) throw new Error(`device rename ${res.status}`);
 };
 
-export const acceptInvites = async (client: ClientLike): Promise<void> => {
-  const { Membership } = await sdk();
-  const invited = client.rooms().filter((room) => room.membership() === Membership.Invited);
-  await Promise.all(invited.map((room) => client.joinRoomById(room.id()).catch(() => undefined)));
-};
-
 export const endSession = (handle: MatrixHandle): Promise<void> => handle.stop();
 
 const previewOf = (module: Sdk, item: EventTimelineItem | undefined): Conversation["preview"] => {
