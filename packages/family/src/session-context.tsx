@@ -34,10 +34,12 @@ import {
   setupNotifications,
   watchNotificationTaps,
 } from "./notifications";
+import { clearNseCredentials, nseCredentialsOf, publishNseCredentials, refreshNseAccessToken } from "./nse";
 import { pendingRingCalls } from "./pending-calls";
+import { forgetMessagePusher, registerMessagePusher } from "./pusher";
 import { publishVoipToken, startVoipRings } from "./pushkit";
 import { SecurityGate } from "./SecurityGate";
-import { acceptInvites, endSession, type Identity, setDeviceName, whoami } from "./session";
+import { endSession, type Identity, setDeviceName, whoami } from "./session";
 
 const t = appStrings();
 
@@ -98,6 +100,7 @@ const open = async (
   if (identity.deviceId)
     void setDeviceName(homeserver, token, identity.deviceId, DEVICE_DISPLAY_NAME).catch(() => undefined);
   const backupOnServer = await backupExistsOnServerRaw(homeserver, token).catch(() => true);
+  const deviceId = identity.deviceId || (stored?.deviceId ?? "");
   const handle = await startMatrix(
     {
       homeserver,
@@ -105,19 +108,31 @@ const open = async (
       refreshToken: stored?.refreshToken ?? undefined,
       oidcClientId: stored?.clientId,
       userId: identity.userId,
-      deviceId: identity.deviceId || (stored?.deviceId ?? ""),
+      deviceId,
     },
     {
       bootstrapIdentity: !backupOnServer,
       watchers: {
         onRotation: (rotated) => {
           void persistRotatedTokens(rotated).catch(() => undefined);
+          void refreshNseAccessToken(rotated.accessToken).catch(() => undefined);
         },
         onAuthError,
       },
     },
   );
-  await acceptInvites(handle.client).catch(() => undefined);
+  await publishNseCredentials(
+    nseCredentialsOf(
+      {
+        homeserver,
+        userId: identity.userId,
+        deviceId,
+        accessToken: handle.client.session().accessToken,
+      },
+      handle.paths,
+      t,
+    ),
+  ).catch(() => undefined);
   return { handle, homeserver, identity };
 };
 
@@ -138,6 +153,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [center, setCenter] = useState<CallCenter | null>(null);
   const [securityDismissed, setSecurityDismissed] = useState(false);
   const [tappedRoomId, setTappedRoomId] = useState<string | null>(null);
+  const [answeredRoomId, setAnsweredRoomId] = useState<string | null>(null);
   const dismissers = useRef(new Map<string, () => void>());
   const activeHandle = useRef<MatrixHandle | null>(null);
 
@@ -154,6 +170,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (handle) void endSession(handle).catch(() => undefined);
     void clearSession().catch(() => undefined);
     void clearSecurityDone().catch(() => undefined);
+    void clearNseCredentials().catch(() => undefined);
+    forgetMessagePusher();
     setSecurityDismissed(false);
     setPhase({ kind: "signedOut" });
   }, []);
@@ -235,6 +253,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const handle = phase.kind === "ready" ? phase.connected.handle : null;
   const client = handle?.client ?? null;
   const deviceId = phase.kind === "ready" ? phase.connected.identity.deviceId : "";
+  const homeserver = phase.kind === "ready" ? phase.connected.homeserver : "";
   const routable = phase.kind === "ready" && (phase.security.state === "ready" || securityDismissed);
 
   const signOut = useCallback(async () => {
@@ -243,6 +262,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const stored = await loadSession().catch(() => null);
     if (stored) await revokeAndForget(stored).catch(() => undefined);
     await clearSecurityDone().catch(() => undefined);
+    await clearNseCredentials().catch(() => undefined);
+    forgetMessagePusher();
     setSecurityDismissed(false);
     setPhase({ kind: "signedOut" });
   }, [handle]);
@@ -259,6 +280,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     void requestNotificationPermission().catch(() => undefined);
   }, [routable]);
 
+  useEffect(() => {
+    if (!routable || !client || !homeserver) return;
+    void registerMessagePusher(client, homeserver, DEVICE_DISPLAY_NAME, t).catch((error) =>
+      console.error("message pusher failed", error),
+    );
+  }, [routable, client, homeserver]);
+
   useEffect(() => watchNotificationTaps(setTappedRoomId), []);
 
   useEffect(() => {
@@ -268,14 +296,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [routable, tappedRoomId, router]);
 
   useEffect(() => {
+    if (!routable || !answeredRoomId) return;
+    setAnsweredRoomId(null);
+    router.push({ pathname: "/call/[roomId]", params: { roomId: answeredRoomId } });
+  }, [routable, answeredRoomId, router]);
+
+  useEffect(() => {
     if (!client) return;
     let started: CallCenter | null = null;
     let cancelled = false;
     void startCallCenter(
       client,
       {
-        onAnswer: (incoming) =>
-          router.push({ pathname: "/call/[roomId]", params: { roomId: incoming.roomId } }),
+        onAnswer: (incoming) => setAnsweredRoomId(incoming.roomId),
         onRemoteEnd: (roomId) => dismissers.current.get(roomId)?.(),
         onMissed: (missed) => {
           void notifyMissedCall(t, missed);

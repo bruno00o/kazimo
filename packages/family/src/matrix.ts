@@ -7,15 +7,34 @@ import {
   SlidingSyncVersionBuilder,
   type SyncServiceLike,
 } from "@unomed/react-native-matrix-sdk";
-import { Paths } from "expo-file-system";
+import { Directory, Paths } from "expo-file-system";
 import { oidcSessionDataOf, type RotatedTokens, sessionDelegateOf } from "./auth";
+import { APP_GROUP, resolveSessionPaths, type SessionPaths, type StoreDirs } from "./store";
 
-const DATA_DIR = "matrix-data";
-const CACHE_DIR = "matrix-cache";
+const MAIN_PROCESS_HOLDER = "main-app";
+
+const containerUri = (): string | null => {
+  try {
+    return Paths.appleSharedContainers[APP_GROUP]?.uri ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const expoDirs = (): StoreDirs => ({
+  document: Paths.document.uri,
+  cache: Paths.cache.uri,
+  container: containerUri(),
+  exists: (uri) => new Directory(uri).exists,
+  move: async (uri, into) => {
+    await new Directory(uri).move(new Directory(into));
+  },
+});
 
 export type MatrixHandle = {
   client: ClientLike;
   sync: SyncServiceLike;
+  paths: SessionPaths;
   stop: () => Promise<void>;
 };
 
@@ -32,8 +51,6 @@ export type MatrixWatchers = {
   onRotation: (tokens: RotatedTokens) => void;
   onAuthError: () => void;
 };
-
-const stripScheme = (uri: string): string => uri.replace(/^file:\/\//, "").replace(/\/$/, "");
 
 const defer = (run: () => void): void => {
   setTimeout(run, 0);
@@ -54,15 +71,13 @@ export const startMatrix = async (
   credentials: MatrixCredentials,
   options: { bootstrapIdentity: boolean; watchers: MatrixWatchers },
 ): Promise<MatrixHandle> => {
-  const suffix = credentials.userId.replace(/[^a-zA-Z0-9]/g, "-");
+  const paths = await resolveSessionPaths(expoDirs(), credentials.userId);
   const restored = sessionOf(credentials);
   const delegate = sessionDelegateOf(restored, (tokens) => defer(() => options.watchers.onRotation(tokens)));
   let builder = new ClientBuilder()
     .homeserverUrl(credentials.homeserver)
-    .sessionPaths(
-      `${stripScheme(Paths.document.uri)}/${DATA_DIR}-${suffix}`,
-      `${stripScheme(Paths.cache.uri)}/${CACHE_DIR}-${suffix}`,
-    )
+    .sessionPaths(paths.dataPath, paths.cachePath)
+    .crossProcessStoreLocksHolderName(MAIN_PROCESS_HOLDER)
     .slidingSyncVersionBuilder(SlidingSyncVersionBuilder.Native)
     .backupDownloadStrategy(BackupDownloadStrategy.OneShot)
     .setSessionDelegate(delegate);
@@ -79,6 +94,7 @@ export const startMatrix = async (
   return {
     client,
     sync,
+    paths,
     stop: async () => {
       authWatch?.cancel();
       await sync.stop().catch(() => {});

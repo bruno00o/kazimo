@@ -65,6 +65,18 @@ export const requestNotificationPermission = async (): Promise<boolean> => {
   }
 };
 
+export const devicePushToken = async (): Promise<string | null> => {
+  const module = await notifications();
+  if (!module) return null;
+  try {
+    const token = await module.getDevicePushTokenAsync();
+    return typeof token.data === "string" && token.data ? token.data : null;
+  } catch (error) {
+    console.log("[notify] device token failed", error);
+    return null;
+  }
+};
+
 export const notifyMissedCall = async (
   strings: Strings,
   call: { roomId: string; title: string },

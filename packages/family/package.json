@@ -51,6 +51,7 @@
     "text-encoding-polyfill": "^0.6.7"
   },
   "devDependencies": {
+    "@bacons/apple-targets": "5.0.0",
     "@config-plugins/react-native-callkeep": "^14.0.2",
     "@config-plugins/react-native-webrtc": "^15.0.2",
     "@livekit/react-native-expo-plugin": "^1.0.2",

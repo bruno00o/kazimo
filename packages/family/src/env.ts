@@ -9,6 +9,8 @@ export const readHomeserver = (): string | null => blankToNull(process.env.EXPO_
 
 export const readOidcClientId = (): string | null => blankToNull(process.env.EXPO_PUBLIC_OIDC_CLIENT_ID);
 
+export const readPushGateway = (): string | null => blankToNull(process.env.EXPO_PUBLIC_PUSH_GATEWAY);
+
 export const readEnv = (): FamilyEnv | null => {
   const homeserver = readHomeserver();
   const token = blankToNull(process.env.EXPO_PUBLIC_MATRIX_TOKEN);
