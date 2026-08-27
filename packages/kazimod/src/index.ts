@@ -7,9 +7,10 @@ import { KioskServer } from "./server";
 
 BunRuntime.runMain(
   Layer.launch(
-    Layer.merge(
-      KioskServer.layer.pipe(Layer.provide(Agent.layer), Layer.provide(KioskBridge.layer)),
-      Dial.layer,
+    KioskServer.layer.pipe(
+      Layer.provide(Agent.layer),
+      Layer.provide(KioskBridge.layer),
+      Layer.provide(Dial.layer),
     ),
   ),
 );

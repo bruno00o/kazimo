@@ -64,6 +64,7 @@ export {
 export { type Tokens, tokens } from "./tokens";
 
 import type { A2uiIcon, A2uiNode } from "./a2ui";
+import type { DialEvent } from "./dial";
 
 export type KioskState =
   | { kind: "idle"; photo: PhotoRef | null; activity?: ActivitySummary }
@@ -155,7 +156,8 @@ export type DaemonToKiosk =
   | { type: "send-message"; roomId: string; text: string }
   | { type: "show-photos"; id: number; userId: string | null }
   | { type: "history-request"; id: number; roomId: string; limit: number }
-  | { type: "ring-stale"; userId: string; tokens: string[] };
+  | { type: "ring-stale"; userId: string; tokens: string[] }
+  | { type: "dial"; event: DialEvent };
 
 export type KioskToDaemon =
   | { type: "ready" }
@@ -169,7 +171,8 @@ export type KioskToDaemon =
   | { type: "contacts"; contacts: Contact[] }
   | { type: "ring-devices"; devices: RingDevices }
   | { type: "history"; id: number; messages: HistoryMessage[] }
-  | { type: "photos-result"; id: number; result: PhotosResult };
+  | { type: "photos-result"; id: number; result: PhotosResult }
+  | { type: "dial-labels"; green: string; magenta: string };
 
 export type KioskReply = Extract<KioskToDaemon, { type: "history" } | { type: "photos-result" }>;
 

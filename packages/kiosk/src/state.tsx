@@ -69,6 +69,7 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
         onShowPhotos: (id) => agent.sendPhotosResult(id, { shown: 0, from: null, timestamp: null }),
         onHistoryRequest: (id) => agent.sendHistory(id, []),
         onRingStale: () => {},
+        onDial: () => {},
       });
       return agent.stop;
     }
@@ -85,6 +86,7 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
       reportContacts: (contacts) => agent?.sendContacts(contacts),
       reportRingDevices: (devices) => agent?.sendRingDevices(devices),
       reportPaired: setPaired,
+      reportDialLabels: (green, magenta) => agent?.sendDialLabels(green, magenta),
       announce: (announcement) => agent?.sendAnnounce(announcement),
     });
     agent = startAgent({
@@ -102,6 +104,7 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
         void handle.history(roomId, limit).then((messages) => agent?.sendHistory(id, messages));
       },
       onRingStale: handle.dropRingTokens,
+      onDial: handle.dialEvent,
     });
     return () => {
       agent?.stop();

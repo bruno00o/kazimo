@@ -4,6 +4,7 @@ import type {
   Announcement,
   Contact,
   DaemonToKiosk,
+  DialEvent,
   HistoryMessage,
   PhotosResult,
   RingDevices,
@@ -24,6 +25,7 @@ export interface AgentCallbacks {
   onShowPhotos: (id: number, userId: string | null) => void;
   onHistoryRequest: (id: number, roomId: string, limit: number) => void;
   onRingStale: (userId: string, tokens: string[]) => void;
+  onDial: (event: DialEvent) => void;
 }
 
 export interface AgentHandle {
@@ -34,6 +36,7 @@ export interface AgentHandle {
   sendAnnounce: (announcement: Announcement) => void;
   sendHistory: (id: number, messages: HistoryMessage[]) => void;
   sendPhotosResult: (id: number, result: PhotosResult) => void;
+  sendDialLabels: (green: string, magenta: string) => void;
   setCallActive: (active: boolean) => void;
 }
 
@@ -47,6 +50,7 @@ export function startAgent(callbacks: AgentCallbacks): AgentHandle {
   let lastActivity: ActivitySummary | null = null;
   let lastContacts: Contact[] | null = null;
   let lastRingDevices: RingDevices | null = null;
+  let lastDialLabels: { green: string; magenta: string } | null = null;
 
   const updateSuppression = () => {
     const next = voicePlaying || callActive;
@@ -95,6 +99,7 @@ export function startAgent(callbacks: AgentCallbacks): AgentHandle {
       if (lastActivity) link.send({ type: "activity", activity: lastActivity });
       if (lastContacts) link.send({ type: "contacts", contacts: lastContacts });
       if (lastRingDevices) link.send({ type: "ring-devices", devices: lastRingDevices });
+      if (lastDialLabels) link.send({ type: "dial-labels", ...lastDialLabels });
     } else if (message.type === "assistant") callbacks.onAssistant(message.tree);
     else if (message.type === "weather") callbacks.onWeather(message.weather);
     else if (message.type === "noisy") callbacks.onNoisy();
@@ -108,6 +113,7 @@ export function startAgent(callbacks: AgentCallbacks): AgentHandle {
     else if (message.type === "history-request")
       callbacks.onHistoryRequest(message.id, message.roomId, message.limit);
     else if (message.type === "ring-stale") callbacks.onRingStale(message.userId, message.tokens);
+    else if (message.type === "dial") callbacks.onDial(message.event);
   }, play);
 
   const onKeyDown = (event: KeyboardEvent) => {
@@ -151,6 +157,10 @@ export function startAgent(callbacks: AgentCallbacks): AgentHandle {
     },
     sendPhotosResult(id, result) {
       link.send({ type: "photos-result", id, result });
+    },
+    sendDialLabels(green, magenta) {
+      lastDialLabels = { green, magenta };
+      link.send({ type: "dial-labels", green, magenta });
     },
     setCallActive(active) {
       callActive = active;

@@ -6,6 +6,9 @@ export interface Strings {
   badgeHint: string;
   badgeOthers: string;
   pairingPrompt: string;
+  dialAnswer: string;
+  dialDecline: string;
+  dialHangUp: string;
 }
 
 const en: Strings = {
@@ -16,6 +19,9 @@ const en: Strings = {
   badgeHint: "Ask Kazimo to read them",
   badgeOthers: "and others",
   pairingPrompt: "Scan this code with the Kazimo app",
+  dialAnswer: "Answer",
+  dialDecline: "Decline",
+  dialHangUp: "Hang up",
 };
 
 const fr: Strings = {
@@ -26,6 +32,9 @@ const fr: Strings = {
   badgeHint: "Demande à Kazimo de les lire",
   badgeOthers: "et d'autres",
   pairingPrompt: "Scannez ce code avec l'application Kazimo",
+  dialAnswer: "Décrocher",
+  dialDecline: "Refuser",
+  dialHangUp: "Raccrocher",
 };
 
 const ptPT: Strings = {
@@ -36,6 +45,9 @@ const ptPT: Strings = {
   badgeHint: "Pede ao Kazimo para os ler",
   badgeOthers: "e outros",
   pairingPrompt: "Digitaliza este código com a aplicação Kazimo",
+  dialAnswer: "Atender",
+  dialDecline: "Recusar",
+  dialHangUp: "Desligar",
 };
 
 const es: Strings = {
@@ -46,6 +58,9 @@ const es: Strings = {
   badgeHint: "Pídele a Kazimo que los lea",
   badgeOthers: "y otros",
   pairingPrompt: "Escanea este código con la aplicación Kazimo",
+  dialAnswer: "Contestar",
+  dialDecline: "Rechazar",
+  dialHangUp: "Colgar",
 };
 
 const byLang: Record<string, Strings> = { en, fr, es, pt: ptPT, "pt-PT": ptPT };

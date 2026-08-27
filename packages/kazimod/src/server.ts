@@ -14,6 +14,7 @@ import { speak, transcribe } from "./ai";
 import { wavFromPcm16 } from "./audio";
 import { KioskBridge, type KioskBridgeApi } from "./bridge";
 import { type DaemonConfig, daemonConfig } from "./config";
+import { Dial, type DialApi } from "./dial";
 import {
   cacheImage,
   ensureImageCacheDir,
@@ -100,6 +101,7 @@ function start(
   agent: AgentBridge,
   wakeModels: WakeModels | null,
   bridge: KioskBridgeApi,
+  dial: DialApi,
 ) {
   const isDev = process.env.NODE_ENV !== "production";
   let latestWeather: WeatherSummary | null = null;
@@ -327,6 +329,8 @@ function start(
           const entries = Object.entries(msg.devices);
           const counted = entries.map(([userId, tokens]) => `${userId} (${tokens.length})`).join(", ");
           log(`ring devices: ${counted || "none"}`);
+        } else if (msg.type === "dial-labels") {
+          dial.setLabels(msg.green, msg.magenta);
         } else if (msg.type === "history" || msg.type === "photos-result") {
           bridge.resolveRequest(msg);
         } else if (msg.type === "announce") {
@@ -372,6 +376,11 @@ function start(
     },
   });
 
+  dial.onEvent((event) => {
+    if (event.t === "pong" || event.t === "hello") return;
+    bridge.send({ type: "dial", event });
+  });
+
   const refreshWeather = async () => {
     const weather = await currentWeather(config.agent);
     if (!weather) return;
@@ -396,6 +405,7 @@ export class KioskServer extends Context.Service<
       const config = yield* daemonConfig;
       const agent = yield* Agent;
       const kioskBridge = yield* KioskBridge;
+      const dial = yield* Dial;
       const bridge: AgentBridge = {
         ask: (question) => Effect.runPromise(agent.ask(question)),
         compose: (question, reports, speech) => Effect.runPromise(agent.compose(question, reports, speech)),
@@ -416,7 +426,7 @@ export class KioskServer extends Context.Service<
 
       const server = yield* Effect.acquireRelease(
         Effect.try({
-          try: () => start(config, bridge, wakeModels, kioskBridge),
+          try: () => start(config, bridge, wakeModels, kioskBridge, dial),
           catch: (cause) => new ServerStartError({ cause }),
         }),
         (running) => Effect.promise(() => running.stop()),

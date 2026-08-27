@@ -8,6 +8,7 @@ import {
   type Contact,
   codesMatch,
   contactStateKeyOf,
+  type DialEvent,
   FRAME_EVENT_TYPE,
   type FrameContact,
   type HistoryMessage,
@@ -42,6 +43,7 @@ import {
   withRinging,
   withUnread,
 } from "../activity";
+import { type Strings, stringsFor } from "../i18n";
 import { isNightAt } from "../night";
 import { playConnected, playEnded, playMessage, startRinging, stopRinging } from "../sounds";
 import { CallHost, type CallIntent, RTC_MEMBER_TYPES } from "./call";
@@ -92,6 +94,7 @@ export interface KioskCallbacks {
   reportContacts: (contacts: Contact[]) => void;
   reportRingDevices: (devices: RingDevices) => void;
   reportPaired: (paired: boolean) => void;
+  reportDialLabels: (green: string, magenta: string) => void;
   announce: (announcement: Announcement) => void;
 }
 
@@ -105,9 +108,16 @@ export interface KioskHandle {
   showPhotos: (userId: string | null) => Promise<PhotosResult>;
   history: (roomId: string, limit: number) => Promise<HistoryMessage[]>;
   dropRingTokens: (userId: string, tokens: string[]) => void;
+  dialEvent: (event: DialEvent) => void;
 }
 
 const INTERRUPTIBLE_MODES = new Set<KioskState["kind"]>(["idle", "message", "assistant"]);
+
+const dialLabelsFor = (kind: KioskState["kind"], strings: Strings): [string, string] => {
+  if (kind === "incoming-call") return [strings.dialAnswer, strings.dialDecline];
+  if (kind === "in-call") return ["", strings.dialHangUp];
+  return ["", ""];
+};
 
 function waitForElement(id: string, timeoutMs = 2000): Promise<HTMLElement | null> {
   return new Promise((resolve) => {
@@ -134,6 +144,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
   let showPhotosSink: ((userId: string | null) => Promise<PhotosResult>) | null = null;
   let historySink: ((roomId: string, limit: number) => Promise<HistoryMessage[]>) | null = null;
   let ringStaleSink: ((userId: string, tokens: string[]) => void) | null = null;
+  let dialSink: ((event: DialEvent) => void) | null = null;
   let pairingAttempts = 0;
   const timers = new Set<ReturnType<typeof setTimeout>>();
 
@@ -278,9 +289,20 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       photos = [...incoming, ...photos].sort((a, b) => b.timestamp - a.timestamp).slice(0, PHOTO_POOL_SIZE);
     };
 
+    const strings = stringsFor(config.lang);
+    let lastDialLabels = "";
+    const reportDialLabels = (kind: KioskState["kind"]) => {
+      const [green, magenta] = dialLabelsFor(kind, strings);
+      const encoded = `${green}\n${magenta}`;
+      if (encoded === lastDialLabels) return;
+      lastDialLabels = encoded;
+      callbacks.reportDialLabels(green, magenta);
+    };
+
     const show = (state: KioskState) => {
       if (state.kind !== "incoming-call") stopRinging();
       mode = state.kind;
+      reportDialLabels(state.kind);
       callbacks.setState(state);
     };
 
@@ -337,6 +359,17 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       scheduleIdleReturn();
     };
 
+    const endCall = () => {
+      if (stopped || mode !== "in-call") return;
+      playEnded();
+      showIdle();
+    };
+
+    const hangUp = () => {
+      if (!callHost || mode !== "in-call") return;
+      void callHost.hangup().then(endCall, endCall);
+    };
+
     const mountCall = async (room: Room, person: Person, intent: CallIntent) => {
       if (!callHost) return false;
       show({ kind: "in-call", caller: person });
@@ -345,15 +378,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
         showIdle();
         return false;
       }
-      callHost.mount(
-        room.roomId,
-        container,
-        () => {
-          playEnded();
-          if (!stopped) showIdle();
-        },
-        intent,
-      );
+      callHost.mount(room.roomId, container, endCall, intent);
       return true;
     };
 
@@ -413,10 +438,29 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       }, RING_TIMEOUT_MS);
     };
 
-    answerSink = () => {
+    const answer = () => {
       if (stopped || !ringing || mode !== "incoming-call") return;
       const room = matrix.getRoom(ringing.roomId);
       if (room) void connect(room, ringing.caller);
+    };
+
+    const decline = () => {
+      if (stopped || !ringing) return;
+      ringing = null;
+      setActivity(withRinging(activity, null));
+      showIdle();
+    };
+
+    answerSink = answer;
+
+    dialSink = (event) => {
+      if (stopped || event.t !== "button" || event.k !== "press") return;
+      if (mode === "incoming-call") {
+        if (event.b === "green") answer();
+        else decline();
+        return;
+      }
+      if (mode === "in-call" && event.b === "magenta") hangUp();
     };
 
     clearSink = (what) => {
@@ -884,6 +928,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       showPhotosSink = null;
       historySink = null;
       ringStaleSink = null;
+      dialSink = null;
       for (const timer of timers) clearTimeout(timer);
       timers.clear();
       void callHost?.hangup();
@@ -914,6 +959,9 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
     },
     dropRingTokens(userId, tokens) {
       ringStaleSink?.(userId, tokens);
+    },
+    dialEvent(event) {
+      dialSink?.(event);
     },
   };
 }

@@ -44,6 +44,27 @@ export const takeDialLines = (pending: string, chunk: string): { lines: string[]
   return { lines: parts, pending: rest.length > DIAL_MAX_LINE_LENGTH ? "" : rest };
 };
 
+export interface DialLabels {
+  readonly green: string;
+  readonly magenta: string;
+}
+
+export const dialReplyTo = (event: DialEvent, labels: DialLabels): DialCommand | null =>
+  event.t === "hello" ? { t: "labels", green: labels.green, magenta: labels.magenta } : null;
+
+export const drainDialInput = (read: () => Promise<number>) =>
+  Effect.gen(function* () {
+    let dropped = 0;
+    while (true) {
+      const bytesRead = yield* Effect.tryPromise({
+        try: read,
+        catch: (cause) => new DialPortError({ cause }),
+      });
+      if (bytesRead === 0) return dropped;
+      dropped += bytesRead;
+    }
+  });
+
 const describeCause = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
 
 const log = (message: string) => Effect.log(`dial: ${message}`);
@@ -110,6 +131,13 @@ export class Dial extends Context.Service<Dial, DialApi>()("kazimo/kazimod/Dial"
 
         yield* configurePort;
 
+        const buffer = Buffer.allocUnsafe(DIAL_READ_BUFFER_BYTES);
+        const readIntoBuffer = () =>
+          port.read(buffer, 0, buffer.length, null).then(({ bytesRead }) => bytesRead);
+
+        const stale = yield* drainDialInput(readIntoBuffer);
+        if (stale > 0) yield* log(`dropped ${stale} stale bytes`);
+
         yield* Effect.acquireRelease(
           Effect.sync(() => {
             write = (command) => {
@@ -127,14 +155,13 @@ export class Dial extends Context.Service<Dial, DialApi>()("kazimo/kazimod/Dial"
         write?.({ t: "ping" });
         write?.({ t: "labels", green: labels.green, magenta: labels.magenta });
 
-        const buffer = Buffer.allocUnsafe(DIAL_READ_BUFFER_BYTES);
         let pending = "";
         let idleReads = 0;
 
         yield* Effect.forever(
           Effect.gen(function* () {
-            const { bytesRead } = yield* Effect.tryPromise({
-              try: () => port.read(buffer, 0, buffer.length, null),
+            const bytesRead = yield* Effect.tryPromise({
+              try: readIntoBuffer,
               catch: (cause) => new DialPortError({ cause }),
             });
 
@@ -156,6 +183,8 @@ export class Dial extends Context.Service<Dial, DialApi>()("kazimo/kazimod/Dial"
               const event = parseDialEvent(line);
               if (event === null) continue;
               yield* log(JSON.stringify(event));
+              const reply = dialReplyTo(event, labels);
+              if (reply) write?.(reply);
               for (const listener of listeners) listener(event);
             }
           }),
