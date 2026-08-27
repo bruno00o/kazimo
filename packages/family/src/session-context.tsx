@@ -329,7 +329,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       started?.stop();
       setCenter(null);
     };
-  }, [client, router]);
+  }, [client]);
 
   if (phase.kind === "loading" || phase.kind === "connecting") return <Status label={t.syncing} spinner />;
   if (phase.kind === "signedOut") {
