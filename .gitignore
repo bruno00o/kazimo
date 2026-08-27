@@ -10,5 +10,7 @@ repos/
 .env*.local
 node_modules/
 dist/
+packages/family/targets/KazimoNotificationService/bindings/
+packages/family/native-pods/matrix-rust-ffi/RnMatrixRustSdk.xcframework
 .pio/
 .DS_Store
