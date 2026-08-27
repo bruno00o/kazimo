@@ -60,14 +60,19 @@ export class KioskWidgetDriver extends WidgetDriver {
   ): Promise<ISendEventDetails> {
     const rid = roomId ?? this.roomId;
     const body = content as Record<string, unknown>;
-    if (stateKey !== undefined && stateKey !== null) {
-      const sendState = this.client.sendStateEvent.bind(this.client) as SendStateFn;
-      const r = await sendState(rid, eventType, body, stateKey);
+    try {
+      if (stateKey !== undefined && stateKey !== null) {
+        const sendState = this.client.sendStateEvent.bind(this.client) as SendStateFn;
+        const r = await sendState(rid, eventType, body, stateKey);
+        return { roomId: rid, eventId: r.event_id };
+      }
+      const send = this.client.sendEvent.bind(this.client) as SendTimelineFn;
+      const r = await send(rid, eventType, body);
       return { roomId: rid, eventId: r.event_id };
+    } catch (error) {
+      console.error("widget sendEvent failed", eventType, stateKey ?? "", rid, error);
+      throw error;
     }
-    const send = this.client.sendEvent.bind(this.client) as SendTimelineFn;
-    const r = await send(rid, eventType, body);
-    return { roomId: rid, eventId: r.event_id };
   }
 
   override async sendDelayedEvent(
@@ -79,16 +84,21 @@ export class KioskWidgetDriver extends WidgetDriver {
   ): Promise<ISendDelayedEventDetails> {
     const rid = roomId ?? this.roomId;
     const body = content as Record<string, unknown>;
-    if (stateKey !== undefined && stateKey !== null) {
-      const sendDelayedState = this.client._unstable_sendDelayedStateEvent.bind(
-        this.client,
-      ) as SendDelayedStateFn;
-      const r = await sendDelayedState(rid, { delay }, eventType, body, stateKey);
+    try {
+      if (stateKey !== undefined && stateKey !== null) {
+        const sendDelayedState = this.client._unstable_sendDelayedStateEvent.bind(
+          this.client,
+        ) as SendDelayedStateFn;
+        const r = await sendDelayedState(rid, { delay }, eventType, body, stateKey);
+        return { roomId: rid, delayId: r.delay_id };
+      }
+      const sendDelayed = this.client._unstable_sendDelayedEvent.bind(this.client) as SendDelayedTimelineFn;
+      const r = await sendDelayed(rid, { delay }, null, eventType, body);
       return { roomId: rid, delayId: r.delay_id };
+    } catch (error) {
+      console.error("widget sendDelayedEvent failed", eventType, stateKey ?? "", rid, error);
+      throw error;
     }
-    const sendDelayed = this.client._unstable_sendDelayedEvent.bind(this.client) as SendDelayedTimelineFn;
-    const r = await sendDelayed(rid, { delay }, null, eventType, body);
-    return { roomId: rid, delayId: r.delay_id };
   }
 
   override async cancelScheduledDelayedEvent(delayId: string): Promise<void> {
