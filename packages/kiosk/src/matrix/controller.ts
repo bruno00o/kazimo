@@ -168,9 +168,17 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
     await matrix
       .initRustCrypto({ cryptoDatabasePrefix: `kazimo-${config.deviceId}` })
       .catch((error) => console.error("rust crypto init failed", error));
-    await matrix.startClient({ initialSyncLimit: 30 });
-    await new Promise<void>((resolve) => matrix.once(ClientEvent.Sync, () => resolve()));
     if (stopped) return;
+    await matrix.startClient({ initialSyncLimit: 30 });
+    if (stopped) {
+      matrix.stopClient();
+      return;
+    }
+    await new Promise<void>((resolve) => matrix.once(ClientEvent.Sync, () => resolve()));
+    if (stopped) {
+      matrix.stopClient();
+      return;
+    }
 
     await ensureCryptoIdentity(matrix, config.recoveryPassphrase).catch((error) =>
       console.error("crypto identity setup failed", error),

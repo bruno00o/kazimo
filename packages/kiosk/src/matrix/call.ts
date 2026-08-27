@@ -5,6 +5,7 @@ import {
   type Room,
   RoomEvent,
   RoomStateEvent,
+  UpdateDelayedEventAction,
 } from "matrix-js-sdk";
 import {
   ClientWidgetApi,
@@ -32,6 +33,18 @@ export const RTC_MEMBER_TYPES = new Set([
   "io.element.rtc.member",
 ]);
 
+export const orphanedDelayIds = (
+  scheduled: readonly { delay_id?: unknown; room_id?: unknown; type?: unknown }[],
+  roomId: string,
+): string[] =>
+  scheduled
+    .filter(
+      (event) =>
+        event.room_id === roomId && typeof event.type === "string" && RTC_MEMBER_TYPES.has(event.type),
+    )
+    .map((event) => event.delay_id)
+    .filter((delayId): delayId is string => typeof delayId === "string");
+
 export class CallHost {
   private api: ClientWidgetApi | null = null;
   private iframe: HTMLIFrameElement | null = null;
@@ -53,6 +66,7 @@ export class CallHost {
     intent: CallIntent = "join_existing_dm",
   ): void {
     if (this.api) return;
+    void this.purgeOrphanedLeaves(roomId);
 
     const iframe = document.createElement("iframe");
     iframe.allow = "camera; microphone; autoplay; display-capture; clipboard-write;";
@@ -154,9 +168,25 @@ export class CallHost {
   private unmount(): void {
     for (const cleanup of this.teardown) cleanup();
     this.teardown = [];
+    this.api?.stop();
     this.iframe?.remove();
     this.iframe = null;
     this.api = null;
+  }
+
+  private async purgeOrphanedLeaves(roomId: string): Promise<void> {
+    try {
+      let fromToken: string | undefined;
+      do {
+        const info = await this.client._unstable_getDelayedEvents("scheduled", undefined, fromToken);
+        for (const delayId of orphanedDelayIds(info.scheduled ?? [], roomId)) {
+          await this.client
+            ._unstable_updateDelayedEvent(delayId, UpdateDelayedEventAction.Cancel)
+            .catch(() => {});
+        }
+        fromToken = info.next_batch;
+      } while (fromToken);
+    } catch {}
   }
 
   private callUrl(roomId: string, intent: CallIntent): string {
