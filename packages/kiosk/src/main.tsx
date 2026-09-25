@@ -3,6 +3,7 @@ import { tokens } from "@kazimo/shared";
 import { EarOff } from "lucide-react";
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { screenAsleep } from "./presence";
 import { AssistantScreen, PairingScreen, ScreenFor } from "./screens";
 import { KioskStateProvider, useKioskState } from "./state";
 
@@ -169,14 +170,14 @@ function NoisyOverlay() {
 }
 
 function App() {
-  const { state, night, noisy, config, paired } = useKioskState();
+  const { state, night, presence, noisy, config, paired } = useKioskState();
   if (forced === "gallery") return <GalleryScreen />;
   if (forced === "pairing")
     return <PairingScreen userId={PAIRING_FIXTURE.userId} code={PAIRING_FIXTURE.code} />;
   if (config?.pairing && paired === false)
     return <PairingScreen userId={config.userId} code={config.pairing.code} />;
   const shown = forced ? (state.kind === "assistant" ? state : (FORCED[forced] ?? IDLE)) : state;
-  const veiled = night && shown.kind === "idle";
+  const veiled = shown.kind === "idle" && screenAsleep(night, presence);
   return (
     <>
       <FadeStack state={shown} />

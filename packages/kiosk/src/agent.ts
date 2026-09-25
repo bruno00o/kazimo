@@ -7,6 +7,7 @@ import type {
   DialEvent,
   HistoryMessage,
   PhotosResult,
+  Presence,
   RingDevices,
   WeatherSummary,
 } from "@kazimo/shared";
@@ -17,6 +18,7 @@ import { playWake, startThinking, stopThinking } from "./sounds";
 export interface AgentCallbacks {
   onAssistant: (tree: A2uiNode | null) => void;
   onWeather: (weather: WeatherSummary | null) => void;
+  onPresence: (presence: Presence) => void;
   onNoisy: () => void;
   onAnswerCall: () => void;
   onActivityClear: (what: "unread" | "missed") => void;
@@ -102,6 +104,7 @@ export function startAgent(callbacks: AgentCallbacks): AgentHandle {
       if (lastDialLabels) link.send({ type: "dial-labels", ...lastDialLabels });
     } else if (message.type === "assistant") callbacks.onAssistant(message.tree);
     else if (message.type === "weather") callbacks.onWeather(message.weather);
+    else if (message.type === "presence") callbacks.onPresence(message.presence);
     else if (message.type === "noisy") callbacks.onNoisy();
     else if (message.type === "wake") playWake();
     else if (message.type === "thinking") (message.on ? startThinking : stopThinking)();

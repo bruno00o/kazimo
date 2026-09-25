@@ -135,6 +135,8 @@ export interface Announcement {
   body: string | null;
 }
 
+export type Presence = "present" | "absent" | "unknown";
+
 export interface WeatherSummary {
   tempC: number;
   icon: A2uiIcon;
@@ -147,6 +149,7 @@ export type DaemonToKiosk =
   | { type: "config"; config: KioskConfig }
   | { type: "assistant"; tree: A2uiNode | null }
   | { type: "weather"; weather: WeatherSummary | null }
+  | { type: "presence"; presence: Presence }
   | { type: "wake" }
   | { type: "thinking"; on: boolean }
   | { type: "noisy" }

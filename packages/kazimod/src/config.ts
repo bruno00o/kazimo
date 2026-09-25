@@ -42,6 +42,7 @@ export interface DaemonConfig extends KioskConfig {
   wake: WakeConfig;
   ring: RingConfig | null;
   dialPort: string | null;
+  radarPort: string | null;
   chatTtlMs: number;
   followupWindowMs: number;
   port: number;
@@ -149,6 +150,7 @@ export const daemonConfig: Config.Config<DaemonConfig> = Config.all({
   }),
   ring,
   dialPort: optionalString("KAZIMO_DIAL_PORT"),
+  radarPort: optionalString("KAZIMO_RADAR_PORT"),
   chatTtlMs: Config.withDefault(Config.number("KAZIMO_CHAT_TTL"), 180).pipe(
     Config.map((seconds) => seconds * 1000),
   ),

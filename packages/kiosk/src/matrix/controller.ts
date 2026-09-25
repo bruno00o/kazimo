@@ -17,6 +17,7 @@ import {
   type Person,
   type PhotoRef,
   type PhotosResult,
+  type Presence,
   RING_EVENT_TYPE,
   type RingDevices,
 } from "@kazimo/shared";
@@ -45,6 +46,7 @@ import {
 } from "../activity";
 import { type Strings, stringsFor } from "../i18n";
 import { isNightAt } from "../night";
+import { mayAutoAnswer, mayInterrupt } from "../presence";
 import { playConnected, playEnded, playMessage, startRinging, stopRinging } from "../sounds";
 import { CallHost, type CallIntent, RTC_MEMBER_TYPES } from "./call";
 import {
@@ -109,6 +111,7 @@ export interface KioskHandle {
   history: (roomId: string, limit: number) => Promise<HistoryMessage[]>;
   dropRingTokens: (userId: string, tokens: string[]) => void;
   dialEvent: (event: DialEvent) => void;
+  setPresence: (presence: Presence) => void;
 }
 
 const INTERRUPTIBLE_MODES = new Set<KioskState["kind"]>(["idle", "message", "assistant"]);
@@ -146,6 +149,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
   let ringStaleSink: ((userId: string, tokens: string[]) => void) | null = null;
   let dialSink: ((event: DialEvent) => void) | null = null;
   let pairingAttempts = 0;
+  let presence: Presence = "unknown";
   const timers = new Set<ReturnType<typeof setTimeout>>();
 
   const later = (fn: () => void, ms: number) => {
@@ -428,11 +432,10 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
       show({ kind: "incoming-call", caller });
       startRinging();
       setActivity(withRinging(activity, caller.displayName));
-      if (!isNightNow()) {
-        later(() => {
-          if (ringing?.roomId === room.roomId && mode === "incoming-call") void connect(room, caller);
-        }, config.autoAnswerDelayMs);
-      }
+      later(() => {
+        if (ringing?.roomId !== room.roomId || mode !== "incoming-call") return;
+        if (mayAutoAnswer(isNightNow(), presence)) void connect(room, caller);
+      }, config.autoAnswerDelayMs);
       later(() => {
         if (ringing?.roomId === room.roomId && mode === "incoming-call") miss();
       }, RING_TIMEOUT_MS);
@@ -575,7 +578,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
         if (!photo || stopped) return;
         addPhotos([photo]);
         photoIndex = 0;
-        if (night || !INTERRUPTIBLE_MODES.has(mode)) {
+        if (!mayInterrupt(night, presence) || !INTERRUPTIBLE_MODES.has(mode)) {
           recordUnread("photo", photo.caption);
         } else {
           await display("photo", photo.caption, photo);
@@ -585,7 +588,7 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
 
       if (content.msgtype === "m.text") {
         const body = String(content.body ?? "");
-        if (night || !INTERRUPTIBLE_MODES.has(mode)) {
+        if (!mayInterrupt(night, presence) || !INTERRUPTIBLE_MODES.has(mode)) {
           recordUnread("text", body);
         } else {
           await display("text", body);
@@ -962,6 +965,9 @@ export function startKiosk(callbacks: KioskCallbacks): KioskHandle {
     },
     dialEvent(event) {
       dialSink?.(event);
+    },
+    setPresence(next) {
+      presence = next;
     },
   };
 }

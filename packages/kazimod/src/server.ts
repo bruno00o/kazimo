@@ -23,6 +23,7 @@ import {
   serveCachedImage,
 } from "./images";
 import { createListener, type Listener } from "./listen";
+import { Presence, type PresenceApi } from "./presence";
 import { currentWeather, imageSearchUrl } from "./tools";
 import { defaultWakeModelPath, loadWakeModels, type WakeModels } from "./wake";
 
@@ -102,6 +103,7 @@ function start(
   wakeModels: WakeModels | null,
   bridge: KioskBridgeApi,
   dial: DialApi,
+  presence: PresenceApi,
 ) {
   const isDev = process.env.NODE_ENV !== "production";
   let latestWeather: WeatherSummary | null = null;
@@ -115,6 +117,7 @@ function start(
     ring: _ring,
     chatTtlMs: _chatTtl,
     followupWindowMs: _followup,
+    radarPort: _radarPort,
     ...kioskConfig
   } = config;
 
@@ -303,6 +306,8 @@ function start(
         const hello: DaemonToKiosk = { type: "config", config: kioskConfig };
         ws.send(JSON.stringify(hello));
         ws.subscribe("weather");
+        ws.subscribe("presence");
+        ws.send(JSON.stringify({ type: "presence", presence: presence.current() } as DaemonToKiosk));
         if (latestWeather)
           ws.send(JSON.stringify({ type: "weather", weather: latestWeather } as DaemonToKiosk));
       },
@@ -383,6 +388,10 @@ function start(
     bridge.send({ type: "dial", event });
   });
 
+  presence.onChange((next) => {
+    server.publish("presence", JSON.stringify({ type: "presence", presence: next } as DaemonToKiosk));
+  });
+
   const refreshWeather = async () => {
     const weather = await currentWeather(config.agent);
     if (!weather) return;
@@ -408,6 +417,7 @@ export class KioskServer extends Context.Service<
       const agent = yield* Agent;
       const kioskBridge = yield* KioskBridge;
       const dial = yield* Dial;
+      const presence = yield* Presence;
       const bridge: AgentBridge = {
         ask: (question) => Effect.runPromise(agent.ask(question)),
         compose: (question, reports, speech) => Effect.runPromise(agent.compose(question, reports, speech)),
@@ -428,7 +438,7 @@ export class KioskServer extends Context.Service<
 
       const server = yield* Effect.acquireRelease(
         Effect.try({
-          try: () => start(config, bridge, wakeModels, kioskBridge, dial),
+          try: () => start(config, bridge, wakeModels, kioskBridge, dial, presence),
           catch: (cause) => new ServerStartError({ cause }),
         }),
         (running) => Effect.promise(() => running.stop()),

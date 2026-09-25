@@ -1,4 +1,4 @@
-import type { KioskConfig, KioskState, WeatherSummary } from "@kazimo/shared";
+import type { KioskConfig, KioskState, Presence, WeatherSummary } from "@kazimo/shared";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { type AgentHandle, startAgent } from "./agent";
 import { startKiosk } from "./matrix/controller";
@@ -15,6 +15,7 @@ const StateCtx = createContext<{
   setState: (s: KioskState) => void;
   lang: string;
   night: boolean;
+  presence: Presence;
   weather: WeatherSummary | null;
   noisy: boolean;
   config: KioskConfig | null;
@@ -24,6 +25,7 @@ const StateCtx = createContext<{
   setState: () => {},
   lang: "en",
   night: false,
+  presence: "unknown",
   weather: null,
   noisy: false,
   config: null,
@@ -34,6 +36,7 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<KioskState>({ kind: "idle", photo: null });
   const [lang, setLang] = useState(forcedLang ?? "en");
   const [night, setNight] = useState(forcedNight);
+  const [presence, setPresence] = useState<Presence>("unknown");
   const [weather, setWeather] = useState<WeatherSummary | null>(null);
   const [noisy, setNoisy] = useState(false);
   const [config, setConfig] = useState<KioskConfig | null>(null);
@@ -61,6 +64,7 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
       const agent: AgentHandle = startAgent({
         onAssistant: (tree) => setState(tree ? { kind: "assistant", tree } : { kind: "idle", photo: null }),
         onWeather: setWeather,
+        onPresence: () => {},
         onNoisy: showNoisy,
         onAnswerCall: () => {},
         onActivityClear: () => {},
@@ -92,6 +96,10 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
     agent = startAgent({
       onAssistant: handle.showAssistant,
       onWeather: setWeather,
+      onPresence: (next) => {
+        handle.setPresence(next);
+        setPresence(next);
+      },
       onNoisy: showNoisy,
       onAnswerCall: handle.answerCall,
       onActivityClear: handle.clearActivity,
@@ -113,7 +121,7 @@ export function KioskStateProvider({ children }: { children: ReactNode }) {
   }, [showNoisy]);
 
   return (
-    <StateCtx.Provider value={{ state, setState, lang, night, weather, noisy, config, paired }}>
+    <StateCtx.Provider value={{ state, setState, lang, night, presence, weather, noisy, config, paired }}>
       {children}
     </StateCtx.Provider>
   );

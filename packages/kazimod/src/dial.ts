@@ -8,6 +8,7 @@ import {
 } from "@kazimo/shared";
 import { Context, Effect, Layer, Schema } from "effect";
 import { daemonConfig } from "./config";
+import { configureSerialPort, describeCause, drainSerialInput, serialDevicePath } from "./serial";
 
 const DIAL_RECONNECT_DELAY_MS = 2000;
 const DIAL_READ_BUFFER_BYTES = 512;
@@ -17,26 +18,6 @@ const DIAL_IDLE_READS_BEFORE_PROBE = 10;
 export class DialPortError extends Schema.TaggedError<DialPortError>()("DialPortError", {
   cause: Schema.Defect(),
 }) {}
-
-export const dialDevicePath = (configured: string, platform: string): string =>
-  platform === "darwin" ? configured.replace(/^\/dev\/tty\./, "/dev/cu.") : configured;
-
-export const dialPortSettings = (path: string, platform: string): string[] => [
-  "stty",
-  platform === "darwin" ? "-f" : "-F",
-  path,
-  String(DIAL_BAUD_RATE),
-  "raw",
-  "-echo",
-  "-echoe",
-  "-echok",
-  "-crtscts",
-  "clocal",
-  "min",
-  "0",
-  "time",
-  "1",
-];
 
 export const takeDialLines = (pending: string, chunk: string): { lines: string[]; pending: string } => {
   const parts = (pending + chunk).split("\n");
@@ -51,21 +32,6 @@ export interface DialLabels {
 
 export const dialReplyTo = (event: DialEvent, labels: DialLabels): DialCommand | null =>
   event.t === "hello" ? { t: "labels", green: labels.green, magenta: labels.magenta } : null;
-
-export const drainDialInput = (read: () => Promise<number>) =>
-  Effect.gen(function* () {
-    let dropped = 0;
-    while (true) {
-      const bytesRead = yield* Effect.tryPromise({
-        try: read,
-        catch: (cause) => new DialPortError({ cause }),
-      });
-      if (bytesRead === 0) return dropped;
-      dropped += bytesRead;
-    }
-  });
-
-const describeCause = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
 
 const log = (message: string) => Effect.log(`dial: ${message}`);
 
@@ -104,19 +70,11 @@ export class Dial extends Context.Service<Dial, DialApi>()("kazimo/kazimod/Dial"
         return api;
       }
 
-      const path = dialDevicePath(config.dialPort, process.platform);
+      const path = serialDevicePath(config.dialPort, process.platform);
       let lastFailure: string | null = null;
 
       const configurePort = Effect.tryPromise({
-        try: async () => {
-          const stty = Bun.spawn(dialPortSettings(path, process.platform), {
-            stdout: "ignore",
-            stderr: "pipe",
-          });
-          const complaint = await new Response(stty.stderr).text();
-          const status = await stty.exited;
-          if (status !== 0) throw new Error(complaint.trim() || `stty exited with ${status}`);
-        },
+        try: () => configureSerialPort(path, process.platform, DIAL_BAUD_RATE),
         catch: (cause) => new DialPortError({ cause }),
       });
 
@@ -135,7 +93,7 @@ export class Dial extends Context.Service<Dial, DialApi>()("kazimo/kazimod/Dial"
         const readIntoBuffer = () =>
           port.read(buffer, 0, buffer.length, null).then(({ bytesRead }) => bytesRead);
 
-        const stale = yield* drainDialInput(readIntoBuffer);
+        const stale = yield* drainSerialInput(readIntoBuffer, (cause) => new DialPortError({ cause }));
         if (stale > 0) yield* log(`dropped ${stale} stale bytes`);
 
         yield* Effect.acquireRelease(
