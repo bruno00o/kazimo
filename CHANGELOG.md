@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.0](https://github.com/bruno00o/kazimo/compare/v0.1.0...v0.2.0) (2026-09-25)
+
+
+### Features
+
+* dial wheel and buttons drive the kiosk call states ([bbae7ce](https://github.com/bruno00o/kazimo/commit/bbae7ce3df45d86fa715ed06db8dc55fe33287c4))
+* mmwave radar presence drives screen wake, auto-answer and announcements ([ed1369f](https://github.com/bruno00o/kazimo/commit/ed1369f8edfb6df4c66aa769977587435cd2d4ba))
+
+
+### Bug Fixes
+
+* call screen ends when the last remote participant leaves ([02dd109](https://github.com/bruno00o/kazimo/commit/02dd109f3ebc083bb8275c39d4ac2e7d29abf8d7))
+* kiosk bridge sink survives overlapping websocket connections ([3d6477f](https://github.com/bruno00o/kazimo/commit/3d6477f901749ffc4bc268f2066e9cb8b6b0b12c))
+
 ## 0.1.0 (2026-08-27)
 
 
