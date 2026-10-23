@@ -12,6 +12,7 @@ mock.module("@unomed/react-native-matrix-sdk", () => ({
 }));
 
 mock.module("react-native", () => ({
+  NativeModules: {},
   Platform: { OS: "ios" },
 }));
 
